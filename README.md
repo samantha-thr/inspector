@@ -1,6 +1,6 @@
-# There Inspector v1.2.3
+# There Inspector v1.4.0
 
-There Inspector is a local There.com `.model` scanner and SQLite indexer.
+There Inspector is a local There.com `.model` scanner, SQLite indexer, explorer, and comparison tool.
 
 ## Install
 
@@ -32,13 +32,17 @@ there_inspector.bat
 C:\Makena\There\ThereClient\Resources
 ```
 
-## v1.2.3 changes
+## v1.4.0 changes
 
-- Adds richer scan progress with hashed, skipped, error, and speed counters.
-- Adds basic SOM header inspection.
-- Adds SOM version counts to scan summaries and statistics.
-- Adds relative paths to the database.
-- Adds larger database statistics, including total size, average size, largest model, and smallest model.
-- Adds CSV export for search results.
-- Adds JSON summary export.
-- Keeps automatic database migration for older v1.0-v1.2 databases.
+- Adds direct model-to-model comparison.
+- Adds internal similar model search.
+- Adds folder-to-folder comparison.
+- Adds same-size, first-256, and exact-hash indexes.
+- Shows relative paths more consistently.
+- Adds duplicate rate and unique hash counts to folder details.
+- Prepares the internal comparison foundation for later public web/IP matching.
+
+## Notes on public/IP comparison
+
+v1.4.0 compares models against the local indexed resource cache only.
+Later versions can add web-resource matching using filenames, hashes, visual thumbnails, and extracted geometry fingerprints.

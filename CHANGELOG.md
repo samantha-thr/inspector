@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.4.0
+
+- Added direct model comparison.
+- Added internal similarity candidate search.
+- Added folder comparison.
+- Added duplicate-rate folder statistics.
+- Added database indexes for comparison fields.
+- Improved relative path display.
+
+## v1.3.0
+
+- Added Model Explorer.
+- Added Duplicate Browser.
+- Added Folder Explorer.
+- Added database settings table.
+- Added first 64-byte and first 256-byte fingerprints.
+- Added exact duplicate viewing.
+- Added open-from-search behavior.
+
 ## v1.2.3
 
 - Improved scanner progress display.

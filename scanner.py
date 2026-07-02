@@ -95,6 +95,8 @@ def scan_folder(root: str | Path, progress_callback: Optional[Callable[[dict], N
                     "som_version": header_info.get("som_version", ""),
                     "header": header_info.get("header", ""),
                     "string_count": header_info.get("string_count", 0),
+                    "first_64_hex": header_info.get("first_64_hex", ""),
+                    "first_256_sha256": header_info.get("first_256_sha256", ""),
                     "last_scanned": time.time(),
                 })
 

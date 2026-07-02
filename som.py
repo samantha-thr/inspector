@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -29,15 +30,13 @@ def inspect_model_header(path: Path) -> dict:
             "som_version": "",
             "string_count": 0,
             "strings": [],
+            "first_64_hex": "",
+            "first_256_sha256": "",
         }
 
     strings = extract_ascii_strings(data)
-    header = ""
+    header = "SOM" if data.startswith(b"SOM") or any("SOM" in s for s in strings[:10]) else ""
     som_version = ""
-
-    joined = "\n".join(strings[:10])
-    if "SOM" in joined:
-        header = "SOM"
 
     for s in strings[:20]:
         low = s.lower()
@@ -52,4 +51,21 @@ def inspect_model_header(path: Path) -> dict:
         "som_version": som_version,
         "string_count": len(strings),
         "strings": strings,
+        "first_64_hex": data[:64].hex(" "),
+        "first_256_sha256": hashlib.sha256(data[:256]).hexdigest() if data else "",
     }
+
+
+def hex_preview(path: Path, bytes_to_read: int = 256) -> str:
+    try:
+        data = path.read_bytes()[:bytes_to_read]
+    except OSError:
+        return ""
+
+    lines = []
+    for offset in range(0, len(data), 16):
+        chunk = data[offset:offset + 16]
+        hex_part = " ".join(f"{b:02X}" for b in chunk)
+        ascii_part = "".join(chr(b) if 32 <= b <= 126 else "." for b in chunk)
+        lines.append(f"{offset:08X}  {hex_part:<47}  {ascii_part}")
+    return "\n".join(lines)
