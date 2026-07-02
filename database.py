@@ -54,7 +54,7 @@ class Database:
             )
         """)
 
-        migrations = {
+        model_migrations = {
             "root": "TEXT NOT NULL DEFAULT ''",
             "relative_path": "TEXT NOT NULL DEFAULT ''",
             "filename": "TEXT NOT NULL DEFAULT ''",
@@ -75,9 +75,61 @@ class Database:
             "sample_strings": "TEXT NOT NULL DEFAULT ''",
             "last_scanned": "REAL NOT NULL DEFAULT 0",
         }
-
-        for column, definition in migrations.items():
+        for column, definition in model_migrations.items():
             self._add_column_if_missing("models", column, definition)
+
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS textures(
+                path TEXT PRIMARY KEY,
+                root TEXT NOT NULL DEFAULT '',
+                relative_path TEXT NOT NULL DEFAULT '',
+                filename TEXT NOT NULL DEFAULT '',
+                folder TEXT NOT NULL DEFAULT '',
+                extension TEXT NOT NULL DEFAULT '',
+                size INTEGER NOT NULL DEFAULT 0,
+                mtime REAL NOT NULL DEFAULT 0,
+                sha256 TEXT NOT NULL DEFAULT '',
+                md5 TEXT NOT NULL DEFAULT '',
+                crc32 INTEGER NOT NULL DEFAULT 0,
+                width INTEGER NOT NULL DEFAULT 0,
+                height INTEGER NOT NULL DEFAULT 0,
+                mode TEXT NOT NULL DEFAULT '',
+                has_alpha INTEGER NOT NULL DEFAULT 0,
+                avg_r REAL NOT NULL DEFAULT 0,
+                avg_g REAL NOT NULL DEFAULT 0,
+                avg_b REAL NOT NULL DEFAULT 0,
+                avg_a REAL NOT NULL DEFAULT 255,
+                ahash TEXT NOT NULL DEFAULT '',
+                analysis_status TEXT NOT NULL DEFAULT '',
+                last_scanned REAL NOT NULL DEFAULT 0
+            )
+        """)
+
+        texture_migrations = {
+            "root": "TEXT NOT NULL DEFAULT ''",
+            "relative_path": "TEXT NOT NULL DEFAULT ''",
+            "filename": "TEXT NOT NULL DEFAULT ''",
+            "folder": "TEXT NOT NULL DEFAULT ''",
+            "extension": "TEXT NOT NULL DEFAULT ''",
+            "size": "INTEGER NOT NULL DEFAULT 0",
+            "mtime": "REAL NOT NULL DEFAULT 0",
+            "sha256": "TEXT NOT NULL DEFAULT ''",
+            "md5": "TEXT NOT NULL DEFAULT ''",
+            "crc32": "INTEGER NOT NULL DEFAULT 0",
+            "width": "INTEGER NOT NULL DEFAULT 0",
+            "height": "INTEGER NOT NULL DEFAULT 0",
+            "mode": "TEXT NOT NULL DEFAULT ''",
+            "has_alpha": "INTEGER NOT NULL DEFAULT 0",
+            "avg_r": "REAL NOT NULL DEFAULT 0",
+            "avg_g": "REAL NOT NULL DEFAULT 0",
+            "avg_b": "REAL NOT NULL DEFAULT 0",
+            "avg_a": "REAL NOT NULL DEFAULT 255",
+            "ahash": "TEXT NOT NULL DEFAULT ''",
+            "analysis_status": "TEXT NOT NULL DEFAULT ''",
+            "last_scanned": "REAL NOT NULL DEFAULT 0",
+        }
+        for column, definition in texture_migrations.items():
+            self._add_column_if_missing("textures", column, definition)
 
         self.db.execute("""
             CREATE TABLE IF NOT EXISTS scan_history(
@@ -89,12 +141,14 @@ class Database:
                 scanned INTEGER NOT NULL,
                 skipped INTEGER NOT NULL,
                 errors INTEGER NOT NULL DEFAULT 0,
-                elapsed REAL NOT NULL
+                elapsed REAL NOT NULL,
+                scan_type TEXT NOT NULL DEFAULT 'model'
             )
         """)
-
         if "errors" not in self._columns("scan_history"):
             self.db.execute("ALTER TABLE scan_history ADD COLUMN errors INTEGER NOT NULL DEFAULT 0")
+        if "scan_type" not in self._columns("scan_history"):
+            self.db.execute("ALTER TABLE scan_history ADD COLUMN scan_type TEXT NOT NULL DEFAULT 'model'")
 
         self.db.execute("""
             CREATE TABLE IF NOT EXISTS settings(
@@ -103,6 +157,7 @@ class Database:
             )
         """)
 
+        # Model indexes
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_sha256 ON models(sha256)")
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_md5 ON models(md5)")
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_crc32 ON models(crc32)")
@@ -116,8 +171,20 @@ class Database:
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_prefix4k ON models(prefix_4k_sha256)")
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_suffix4k ON models(suffix_4k_sha256)")
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_middle4k ON models(middle_4k_sha256)")
+
+        # Texture indexes
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_sha256 ON textures(sha256)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_size ON textures(size)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_folder ON textures(folder)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_filename ON textures(filename)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_dimensions ON textures(width, height)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_ahash ON textures(ahash)")
+
         self.db.commit()
 
+    # -------------------------
+    # Model methods
+    # -------------------------
     def get_existing_map(self) -> dict[str, sqlite3.Row]:
         rows = self.db.execute("SELECT path, size, mtime FROM models").fetchall()
         return {row["path"]: row for row in rows}
@@ -139,13 +206,22 @@ class Database:
             )
         """, row)
 
-    def add_scan_history(self, root: str, started: float, found: int, scanned: int, skipped: int, errors: int) -> None:
+    def add_scan_history(
+        self,
+        root: str,
+        started: float,
+        found: int,
+        scanned: int,
+        skipped: int,
+        errors: int,
+        scan_type: str = "model",
+    ) -> None:
         finished = time.time()
         self.db.execute("""
-            INSERT INTO scan_history(started, finished, root, found, scanned, skipped, errors, elapsed)
-            VALUES(?,?,?,?,?,?,?,?)
-        """, (started, finished, root, found, scanned, skipped, errors, finished - started))
-        self.set_setting("last_scan_root", root)
+            INSERT INTO scan_history(started, finished, root, found, scanned, skipped, errors, elapsed, scan_type)
+            VALUES(?,?,?,?,?,?,?,?,?)
+        """, (started, finished, root, found, scanned, skipped, errors, finished - started, scan_type))
+        self.set_setting(f"last_{scan_type}_scan_root", root)
         self.db.commit()
 
     def set_setting(self, key: str, value: str) -> None:
@@ -230,7 +306,12 @@ class Database:
         smallest = self.db.execute("SELECT filename, folder, size, path FROM models ORDER BY size ASC LIMIT 1").fetchone()
         return dict(row) | {"largest": largest, "smallest": smallest}
 
-    def latest_scan(self):
+    def latest_scan(self, scan_type: str | None = None):
+        if scan_type:
+            return self.db.execute(
+                "SELECT * FROM scan_history WHERE scan_type = ? ORDER BY id DESC LIMIT 1",
+                (scan_type,),
+            ).fetchone()
         return self.db.execute("SELECT * FROM scan_history ORDER BY id DESC LIMIT 1").fetchone()
 
     def search(self, term: str, limit: int = 100):
@@ -348,6 +429,103 @@ class Database:
             )
         """, (folder_a, folder_b)).fetchone()["count"]
         return {"a": a, "b": b, "shared_hashes": overlap}
+
+    # -------------------------
+    # Texture methods
+    # -------------------------
+    def get_existing_texture_map(self) -> dict[str, sqlite3.Row]:
+        rows = self.db.execute("SELECT path, size, mtime FROM textures").fetchall()
+        return {row["path"]: row for row in rows}
+
+    def upsert_texture(self, row: dict[str, Any]) -> None:
+        self.db.execute("""
+            INSERT OR REPLACE INTO textures(
+                path, root, relative_path, filename, folder, extension, size, mtime,
+                sha256, md5, crc32, width, height, mode, has_alpha,
+                avg_r, avg_g, avg_b, avg_a, ahash, analysis_status, last_scanned
+            ) VALUES(
+                :path, :root, :relative_path, :filename, :folder, :extension, :size, :mtime,
+                :sha256, :md5, :crc32, :width, :height, :mode, :has_alpha,
+                :avg_r, :avg_g, :avg_b, :avg_a, :ahash, :analysis_status, :last_scanned
+            )
+        """, row)
+
+    def count_textures(self) -> int:
+        return int(self.db.execute("SELECT COUNT(*) FROM textures").fetchone()[0])
+
+    def texture_stats(self) -> dict[str, Any]:
+        row = self.db.execute("""
+            SELECT COUNT(*) AS total,
+                COALESCE(SUM(size), 0) AS total_size,
+                COALESCE(AVG(size), 0) AS avg_size,
+                COUNT(DISTINCT sha256) AS unique_hashes
+            FROM textures
+        """).fetchone()
+        return dict(row)
+
+    def search_textures(self, term: str, limit: int = 100):
+        like = f"%{term}%"
+        return self.db.execute("""
+            SELECT * FROM textures
+            WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR path LIKE ? OR sha256 LIKE ?
+            ORDER BY folder, filename LIMIT ?
+        """, (like, like, like, like, like, limit)).fetchall()
+
+    def get_texture_by_path(self, path: str):
+        return self.db.execute("SELECT * FROM textures WHERE path = ?", (path,)).fetchone()
+
+    def get_texture_by_relative_or_filename(self, query: str):
+        return self.db.execute("""
+            SELECT * FROM textures
+            WHERE relative_path = ? OR filename = ? OR path = ?
+            ORDER BY relative_path LIMIT 1
+        """, (query, query, query)).fetchone()
+
+    def duplicate_texture_hashes(self, limit: int = 100):
+        return self.db.execute("""
+            SELECT sha256, COUNT(*) AS count, SUM(size) AS total_size
+            FROM textures WHERE sha256 != ''
+            GROUP BY sha256 HAVING COUNT(*) > 1
+            ORDER BY count DESC, total_size DESC LIMIT ?
+        """, (limit,)).fetchall()
+
+    def textures_by_hash(self, sha256: str):
+        return self.db.execute("""
+            SELECT * FROM textures WHERE sha256 = ? ORDER BY folder, filename
+        """, (sha256,)).fetchall()
+
+    def similar_textures(self, path: str, limit: int = 100):
+        tex = self.get_texture_by_path(path)
+        if not tex:
+            return []
+        return self.db.execute("""
+            SELECT *,
+                CASE WHEN sha256 = ? AND sha256 != '' THEN 100 ELSE 0 END
+              + CASE WHEN ahash = ? AND ahash != '' THEN 45 ELSE 0 END
+              + CASE WHEN width = ? AND width != 0 THEN 10 ELSE 0 END
+              + CASE WHEN height = ? AND height != 0 THEN 10 ELSE 0 END
+              + CASE WHEN has_alpha = ? THEN 5 ELSE 0 END
+              + CASE WHEN ABS(avg_r - ?) < 8 AND ABS(avg_g - ?) < 8 AND ABS(avg_b - ?) < 8 THEN 20 ELSE 0 END
+              + CASE WHEN ABS(size - ?) < 128 THEN 5 ELSE 0 END
+                AS score
+            FROM textures
+            WHERE path != ?
+              AND (
+                    sha256 = ?
+                 OR ahash = ?
+                 OR (width = ? AND height = ?)
+                 OR ABS(avg_r - ?) < 20
+                 OR ABS(avg_g - ?) < 20
+                 OR ABS(avg_b - ?) < 20
+              )
+            ORDER BY score DESC, folder, filename
+            LIMIT ?
+        """, (
+            tex["sha256"], tex["ahash"], tex["width"], tex["height"], tex["has_alpha"],
+            tex["avg_r"], tex["avg_g"], tex["avg_b"], tex["size"], tex["path"],
+            tex["sha256"], tex["ahash"], tex["width"], tex["height"],
+            tex["avg_r"], tex["avg_g"], tex["avg_b"], limit
+        )).fetchall()
 
     def begin(self) -> None:
         self.db.execute("BEGIN")

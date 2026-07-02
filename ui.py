@@ -8,10 +8,10 @@ from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
 
-from config import APP_NAME, DEFAULT_SCAN_PATH, DUPLICATE_LIMIT, FOLDER_LIMIT, SEARCH_LIMIT, SIMILARITY_LIMIT, VERSION
+from config import APP_NAME, DEFAULT_SCAN_PATH, DUPLICATE_LIMIT, FOLDER_LIMIT, SEARCH_LIMIT, SIMILARITY_LIMIT, TEXTURE_LIMIT, VERSION
 from database import Database
 from reports import export_database_summary, export_search_results
-from scanner import scan_folder
+from scanner import scan_folder, scan_textures
 
 console = Console()
 
@@ -46,30 +46,29 @@ def main_menu() -> None:
         header()
         show_database_quick_status()
         console.print(f"\n[bold]Default Resources:[/bold] {DEFAULT_SCAN_PATH}\n")
-        console.print("[bold]1.[/bold] Scan Client Resources")
-        console.print("[bold]2.[/bold] Scan Another Folder")
-        console.print("[bold]3.[/bold] Search Database")
-        console.print("[bold]4.[/bold] Model Explorer")
-        console.print("[bold]5.[/bold] Compare Models")
-        console.print("[bold]6.[/bold] Similar Models")
-        console.print("[bold]7.[/bold] Duplicate Browser")
-        console.print("[bold]8.[/bold] Folder Explorer")
-        console.print("[bold]9.[/bold] Compare Folders")
+        console.print("[bold]1.[/bold] Scan Manager")
+        console.print("[bold]2.[/bold] Search Models")
+        console.print("[bold]3.[/bold] Model Explorer")
+        console.print("[bold]4.[/bold] Compare Models")
+        console.print("[bold]5.[/bold] Similar Models")
+        console.print("[bold]6.[/bold] Duplicate Browser")
+        console.print("[bold]7.[/bold] Folder Explorer")
+        console.print("[bold]8.[/bold] Compare Folders")
+        console.print("[bold]9.[/bold] Texture Browser")
         console.print("[bold]10.[/bold] Statistics")
         console.print("[bold]11.[/bold] Export Summary Report")
         console.print("[bold]12.[/bold] Exit")
+
         choice = console.input("\nChoice: ").strip()
-        if choice == "1": run_scan(DEFAULT_SCAN_PATH)
-        elif choice == "2":
-            path = console.input("Folder to scan: ").strip().strip('"')
-            if path: run_scan(path)
-        elif choice == "3": search_database()
-        elif choice == "4": model_explorer()
-        elif choice == "5": compare_models_prompt()
-        elif choice == "6": similar_models_prompt()
-        elif choice == "7": duplicate_browser()
-        elif choice == "8": folder_explorer()
-        elif choice == "9": compare_folders_prompt()
+        if choice == "1": scan_manager()
+        elif choice == "2": search_database()
+        elif choice == "3": model_explorer()
+        elif choice == "4": compare_models_prompt()
+        elif choice == "5": similar_models_prompt()
+        elif choice == "6": duplicate_browser()
+        elif choice == "7": folder_explorer()
+        elif choice == "8": compare_folders_prompt()
+        elif choice == "9": texture_browser()
         elif choice == "10": show_statistics()
         elif choice == "11": export_summary()
         elif choice == "12": return
@@ -78,63 +77,136 @@ def main_menu() -> None:
 def show_database_quick_status() -> None:
     db = Database()
     total = db.count_models()
-    latest = db.latest_scan()
+    textures = db.count_textures()
+    latest_model = db.latest_scan("model_incremental") or db.latest_scan("model_full")
+    latest_texture = db.latest_scan("texture_incremental") or db.latest_scan("texture_full")
     db.close()
-    if latest:
-        last = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest["finished"]))
-        console.print(f"[bold]Database:[/bold] {total:,} models indexed | Last scan: {last}")
-    else:
-        console.print(f"[bold]Database:[/bold] {total:,} models indexed | No scan history yet")
+
+    model_text = "never" if not latest_model else time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest_model["finished"]))
+    texture_text = "never" if not latest_texture else time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest_texture["finished"]))
+    console.print(f"[bold]Database:[/bold] {total:,} models | {textures:,} textures")
+    console.print(f"[bold]Last Model Scan:[/bold] {model_text} | [bold]Last Texture Scan:[/bold] {texture_text}")
 
 
-def run_scan(path: str) -> None:
-    root = Path(path)
+def scan_manager() -> None:
+    while True:
+        console.clear()
+        header()
+        console.print("[bold cyan]Scan Manager[/bold cyan]\n")
+        console.print("[bold]1.[/bold] Incremental Model Scan")
+        console.print("[bold]2.[/bold] Full Model Rescan")
+        console.print("[bold]3.[/bold] Incremental Texture Scan")
+        console.print("[bold]4.[/bold] Full Texture Rescan")
+        console.print("[bold]5.[/bold] Scan Another Folder - Models")
+        console.print("[bold]6.[/bold] Scan Another Folder - Textures")
+        console.print("[bold]7.[/bold] Back")
+        choice = console.input("\nChoice: ").strip()
+
+        if choice == "1":
+            run_model_scan(DEFAULT_SCAN_PATH, full_rescan=False)
+        elif choice == "2":
+            run_model_scan(DEFAULT_SCAN_PATH, full_rescan=True)
+        elif choice == "3":
+            run_texture_scan(DEFAULT_SCAN_PATH, full_rescan=False)
+        elif choice == "4":
+            run_texture_scan(DEFAULT_SCAN_PATH, full_rescan=True)
+        elif choice == "5":
+            path = console.input("Folder to scan for models: ").strip().strip('"')
+            if path:
+                full = console.input("Full rescan? (y/N): ").strip().lower() == "y"
+                run_model_scan(path, full_rescan=full)
+        elif choice == "6":
+            path = console.input("Folder to scan for textures: ").strip().strip('"')
+            if path:
+                full = console.input("Full rescan? (y/N): ").strip().lower() == "y"
+                run_texture_scan(path, full_rescan=full)
+        elif choice == "7":
+            return
+
+
+def run_progress_scan(title: str, root: Path, scan_func, full_rescan: bool) -> dict:
     console.clear()
     header()
     if not root.exists():
         console.print(f"[bold red]Path not found:[/bold red] {root}")
         pause()
-        return
-    console.print(f"[bold green]Scanning:[/bold green] {root}\n")
+        return {}
+
+    console.print(f"[bold green]{title}:[/bold green] {root}\n")
     with Progress(
         SpinnerColumn(), TextColumn("[bold]{task.description}[/bold]"), BarColumn(bar_width=None),
         TextColumn("{task.completed:,}/{task.total:,}"), TextColumn("[cyan]{task.percentage:>5.1f}%[/cyan]"),
         TextColumn("[green]H:{task.fields[hashed]}[/green]"), TextColumn("[yellow]S:{task.fields[skipped]}[/yellow]"),
-        TextColumn("[red]E:{task.fields[errors]}[/red]"), TextColumn("[magenta]{task.fields[speed]:>7} models/s[/magenta]"),
+        TextColumn("[red]E:{task.fields[errors]}[/red]"), TextColumn("[magenta]{task.fields[speed]:>7} files/s[/magenta]"),
         TimeElapsedColumn(), TimeRemainingColumn(), console=console, transient=False,
     ) as progress:
-        task = progress.add_task("Discovering models...", total=1, hashed="0", skipped="0", errors="0", speed="0.0")
+        task = progress.add_task("Discovering files...", total=1, hashed="0", skipped="0", errors="0", speed="0.0")
+
         def update(info: dict) -> None:
             if progress.tasks[0].total != info["total"]:
                 progress.update(task, total=info["total"])
             description = info["relative_path"]
             if len(description) > 58:
                 description = "..." + description[-55:]
-            progress.update(task, completed=info["index"], description=description,
-                            hashed=f"{info['scanned']:,}", skipped=f"{info['skipped']:,}",
-                            errors=f"{info['errors']:,}", speed=f"{info['speed']:.1f}")
-        summary = scan_folder(root, update)
-    show_scan_summary(summary)
+            progress.update(
+                task, completed=info["index"], description=description,
+                hashed=f"{info['scanned']:,}", skipped=f"{info['skipped']:,}",
+                errors=f"{info['errors']:,}", speed=f"{info['speed']:.1f}",
+            )
+
+        return scan_func(root, update, full_rescan=full_rescan)
+
+
+def run_model_scan(path: str, full_rescan: bool = False) -> None:
+    summary = run_progress_scan("Full Model Rescan" if full_rescan else "Incremental Model Scan", Path(path), scan_folder, full_rescan)
+    if summary:
+        show_scan_summary(summary, "Models")
     pause()
 
 
-def show_scan_summary(summary: dict) -> None:
-    table = Table(title="Scan Complete", show_header=True, header_style="bold cyan")
+def run_texture_scan(path: str, full_rescan: bool = False) -> None:
+    summary = run_progress_scan("Full Texture Rescan" if full_rescan else "Incremental Texture Scan", Path(path), scan_textures, full_rescan)
+    if summary:
+        show_texture_scan_summary(summary)
+    pause()
+
+
+def show_scan_summary(summary: dict, label: str = "Models") -> None:
+    table = Table(title=f"{summary.get('scan_mode', 'Scan')} Complete", show_header=True, header_style="bold cyan")
     table.add_column("Metric")
     table.add_column("Value", justify="right")
-    for label, value in [
-        ("Root", summary["root"]), ("Models Found", f"{summary['found']:,}"),
-        ("Hashed / Updated", f"{summary['scanned']:,}"), ("Skipped Unchanged", f"{summary['skipped']:,}"),
-        ("Errors", f"{summary['errors']:,}"), ("Elapsed", format_seconds(summary["elapsed"])),
-        ("Average Speed", f"{summary['found'] / max(summary['elapsed'], 0.001):,.1f} models/s"),
-        ("Models in Database", f"{summary['database_models']:,}"),
-        ("Duplicate Hash Groups", f"{summary['duplicate_hash_groups']:,}")
-    ]:
-        table.add_row(label, value)
+    table.add_row("Root", summary["root"])
+    table.add_row(f"{label} Found", f"{summary['found']:,}")
+    table.add_row("Hashed / Updated", f"{summary['scanned']:,}")
+    table.add_row("Skipped Unchanged", f"{summary['skipped']:,}")
+    table.add_row("Errors", f"{summary['errors']:,}")
+    table.add_row("Elapsed", format_seconds(summary["elapsed"]))
+    table.add_row("Average Speed", f"{summary['found'] / max(summary['elapsed'], 0.001):,.1f} files/s")
+    table.add_row("Models in Database", f"{summary['database_models']:,}")
+    table.add_row("Duplicate Hash Groups", f"{summary['duplicate_hash_groups']:,}")
     for key, value in summary.get("filename_types", {}).items():
         table.add_row(key, f"{value:,}")
     for key, value in summary.get("som_versions", {}).items():
         table.add_row(f"SOM {key}", f"{value:,}")
+    console.print()
+    console.print(table)
+
+
+def show_texture_scan_summary(summary: dict) -> None:
+    stats = summary.get("texture_stats", {})
+    table = Table(title=f"{summary.get('scan_mode', 'Texture Scan')} Complete", show_header=True, header_style="bold cyan")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Root", summary["root"])
+    table.add_row("Textures Found", f"{summary['found']:,}")
+    table.add_row("Analyzed / Updated", f"{summary['scanned']:,}")
+    table.add_row("Skipped Unchanged", f"{summary['skipped']:,}")
+    table.add_row("Errors", f"{summary['errors']:,}")
+    table.add_row("Elapsed", format_seconds(summary["elapsed"]))
+    table.add_row("Average Speed", f"{summary['found'] / max(summary['elapsed'], 0.001):,.1f} files/s")
+    table.add_row("Textures in Database", f"{summary['database_textures']:,}")
+    table.add_row("Unique Texture Hashes", f"{stats.get('unique_hashes', 0):,}")
+    table.add_row("Total Texture Data", format_bytes(stats.get("total_size", 0)))
     console.print()
     console.print(table)
 
@@ -148,8 +220,23 @@ def render_model_table(rows, title: str) -> None:
     table.add_column("Size", justify="right")
     table.add_column("SHA256")
     for i, row in enumerate(rows, 1):
-        table.add_row(str(i), row["relative_path"], row["filename_type"], row["som_version"] or "-",
-                      format_bytes(row["size"]), row["sha256"][:16] + "...")
+        table.add_row(str(i), row["relative_path"], row["filename_type"], row["som_version"] or "-", format_bytes(row["size"]), row["sha256"][:16] + "...")
+    console.print(table)
+
+
+def render_texture_table(rows, title: str) -> None:
+    table = Table(title=title, header_style="bold cyan")
+    table.add_column("#", justify="right")
+    table.add_column("Relative Path")
+    table.add_column("Dimensions")
+    table.add_column("Alpha")
+    table.add_column("Avg RGB")
+    table.add_column("Size", justify="right")
+    table.add_column("SHA256")
+    for i, row in enumerate(rows, 1):
+        dims = f"{row['width']}x{row['height']}" if row["width"] else "-"
+        avg = f"{row['avg_r']:.0f},{row['avg_g']:.0f},{row['avg_b']:.0f}"
+        table.add_row(str(i), row["relative_path"], dims, "yes" if row["has_alpha"] else "no", avg, format_bytes(row["size"]), row["sha256"][:16] + "...")
     console.print(table)
 
 
@@ -349,30 +436,95 @@ def compare_folders_prompt() -> None:
     console.print(table); pause()
 
 
+def texture_browser() -> None:
+    console.clear(); header()
+    console.print("[bold cyan]Texture Browser[/bold cyan]\n")
+    console.print("[bold]1.[/bold] Search Textures")
+    console.print("[bold]2.[/bold] Duplicate Texture Hashes")
+    console.print("[bold]3.[/bold] Similar Textures")
+    console.print("[bold]4.[/bold] Back")
+    choice = console.input("\nChoice: ").strip()
+    if choice == "1": search_textures()
+    elif choice == "2": duplicate_textures()
+    elif choice == "3": similar_textures_prompt()
+
+
+def search_textures() -> None:
+    console.clear(); header()
+    term = console.input("Search texture filename, folder, path, or hash: ").strip()
+    if not term: return
+    db = Database(); rows = db.search_textures(term, TEXTURE_LIMIT); db.close()
+    render_texture_table(rows, f"Texture Search: {term}")
+    pause()
+
+
+def duplicate_textures() -> None:
+    console.clear(); header()
+    db = Database(); rows = db.duplicate_texture_hashes(TEXTURE_LIMIT); db.close()
+    table = Table(title="Duplicate Texture Hash Groups", header_style="bold cyan")
+    table.add_column("#", justify="right"); table.add_column("Copies", justify="right"); table.add_column("Total Size", justify="right"); table.add_column("SHA256")
+    for i, row in enumerate(rows, 1):
+        table.add_row(str(i), f"{row['count']:,}", format_bytes(row["total_size"]), row["sha256"][:32] + "...")
+    console.print(table)
+    if rows:
+        choice = console.input("\nEnter group number to view copies, or press Enter to return: ").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(rows):
+            db = Database(); textures = db.textures_by_hash(rows[int(choice)-1]["sha256"]); db.close()
+            render_texture_table(textures, "Duplicate Texture Copies")
+    pause()
+
+
+def similar_textures_prompt() -> None:
+    console.clear(); header()
+    query = console.input("Texture filename/path to compare: ").strip().strip('"')
+    if not query: return
+    db = Database()
+    row = db.get_texture_by_relative_or_filename(query)
+    if not row:
+        db.close(); console.print("[bold red]Texture not found.[/bold red]"); pause(); return
+    rows = db.similar_textures(row["path"], TEXTURE_LIMIT)
+    db.close()
+    console.print(f"[bold]Base Texture:[/bold] {row['relative_path']}\n")
+    table = Table(title="Similar Texture Candidates", header_style="bold cyan")
+    table.add_column("#", justify="right"); table.add_column("Score", justify="right"); table.add_column("Relative Path")
+    table.add_column("Dimensions"); table.add_column("Avg RGB"); table.add_column("SHA256")
+    for i, tex in enumerate(rows, 1):
+        dims = f"{tex['width']}x{tex['height']}" if tex["width"] else "-"
+        avg = f"{tex['avg_r']:.0f},{tex['avg_g']:.0f},{tex['avg_b']:.0f}"
+        table.add_row(str(i), str(tex["score"]), tex["relative_path"], dims, avg, tex["sha256"][:16] + "...")
+    console.print(table)
+    pause()
+
+
 def show_statistics() -> None:
     console.clear(); header()
     db = Database()
-    total = db.count_models(); duplicate_groups = db.duplicate_hash_count()
-    type_counts = db.filename_type_counts(); som_counts = db.som_version_counts()
-    folders = db.folder_counts(25); size_stats = db.size_stats(); latest = db.latest_scan()
+    total = db.count_models(); textures = db.count_textures(); texture_stats = db.texture_stats()
+    duplicate_groups = db.duplicate_hash_count(); type_counts = db.filename_type_counts()
+    som_counts = db.som_version_counts(); folders = db.folder_counts(25)
+    size_stats = db.size_stats(); latest = db.latest_scan()
     db.close()
     table = Table(title="Database Statistics", header_style="bold cyan")
     table.add_column("Metric"); table.add_column("Value", justify="right")
-    table.add_row("Models Indexed", f"{total:,}"); table.add_row("Duplicate Hash Groups", f"{duplicate_groups:,}")
+    table.add_row("Models Indexed", f"{total:,}")
+    table.add_row("Textures Indexed", f"{textures:,}")
+    table.add_row("Duplicate Model Hash Groups", f"{duplicate_groups:,}")
+    table.add_row("Unique Texture Hashes", f"{texture_stats.get('unique_hashes', 0):,}")
     table.add_row("Total Model Data", format_bytes(size_stats["total_size"]))
+    table.add_row("Total Texture Data", format_bytes(texture_stats.get("total_size", 0)))
     table.add_row("Average Model Size", format_bytes(size_stats["avg_size"]))
-    table.add_row("Smallest Model", format_bytes(size_stats["min_size"]))
-    table.add_row("Largest Model", format_bytes(size_stats["max_size"]))
+    table.add_row("Average Texture Size", format_bytes(texture_stats.get("avg_size", 0)))
     if latest:
         table.add_row("Last Scan Found", f"{latest['found']:,}")
-        table.add_row("Last Scan Hashed", f"{latest['scanned']:,}")
+        table.add_row("Last Scan Updated", f"{latest['scanned']:,}")
         table.add_row("Last Scan Skipped", f"{latest['skipped']:,}")
         table.add_row("Last Scan Errors", f"{latest['errors']:,}")
+        table.add_row("Last Scan Type", latest["scan_type"])
         table.add_row("Last Scan Elapsed", format_seconds(latest["elapsed"]))
     for key, value in type_counts.items(): table.add_row(key, f"{value:,}")
     for key, value in som_counts.items(): table.add_row(f"SOM {key}", f"{value:,}")
     console.print(table)
-    folder_table = Table(title="Top Folders", header_style="bold cyan")
+    folder_table = Table(title="Top Model Folders", header_style="bold cyan")
     folder_table.add_column("Folder"); folder_table.add_column("Models", justify="right")
     for row in folders: folder_table.add_row(row["folder"], f"{row['count']:,}")
     console.print(folder_table); pause()
