@@ -1,0 +1,2 @@
+python there_inspector.py
+pause
