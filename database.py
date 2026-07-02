@@ -43,6 +43,13 @@ class Database:
                 string_count INTEGER NOT NULL DEFAULT 0,
                 first_64_hex TEXT NOT NULL DEFAULT '',
                 first_256_sha256 TEXT NOT NULL DEFAULT '',
+                prefix_4k_sha256 TEXT NOT NULL DEFAULT '',
+                suffix_4k_sha256 TEXT NOT NULL DEFAULT '',
+                middle_4k_sha256 TEXT NOT NULL DEFAULT '',
+                entropy REAL NOT NULL DEFAULT 0,
+                printable_ratio REAL NOT NULL DEFAULT 0,
+                zero_ratio REAL NOT NULL DEFAULT 0,
+                sample_strings TEXT NOT NULL DEFAULT '',
                 last_scanned REAL NOT NULL DEFAULT 0
             )
         """)
@@ -59,6 +66,13 @@ class Database:
             "string_count": "INTEGER NOT NULL DEFAULT 0",
             "first_64_hex": "TEXT NOT NULL DEFAULT ''",
             "first_256_sha256": "TEXT NOT NULL DEFAULT ''",
+            "prefix_4k_sha256": "TEXT NOT NULL DEFAULT ''",
+            "suffix_4k_sha256": "TEXT NOT NULL DEFAULT ''",
+            "middle_4k_sha256": "TEXT NOT NULL DEFAULT ''",
+            "entropy": "REAL NOT NULL DEFAULT 0",
+            "printable_ratio": "REAL NOT NULL DEFAULT 0",
+            "zero_ratio": "REAL NOT NULL DEFAULT 0",
+            "sample_strings": "TEXT NOT NULL DEFAULT ''",
             "last_scanned": "REAL NOT NULL DEFAULT 0",
         }
 
@@ -99,6 +113,9 @@ class Database:
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_som_version ON models(som_version)")
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_relative_path ON models(relative_path)")
         self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_first256 ON models(first_256_sha256)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_prefix4k ON models(prefix_4k_sha256)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_suffix4k ON models(suffix_4k_sha256)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_middle4k ON models(middle_4k_sha256)")
         self.db.commit()
 
     def get_existing_map(self) -> dict[str, sqlite3.Row]:
@@ -110,23 +127,19 @@ class Database:
             INSERT OR REPLACE INTO models(
                 path, root, relative_path, filename, folder, size, mtime,
                 sha256, md5, crc32, filename_type, som_version, header,
-                string_count, first_64_hex, first_256_sha256, last_scanned
+                string_count, first_64_hex, first_256_sha256, prefix_4k_sha256,
+                suffix_4k_sha256, middle_4k_sha256, entropy, printable_ratio,
+                zero_ratio, sample_strings, last_scanned
             ) VALUES(
                 :path, :root, :relative_path, :filename, :folder, :size, :mtime,
                 :sha256, :md5, :crc32, :filename_type, :som_version, :header,
-                :string_count, :first_64_hex, :first_256_sha256, :last_scanned
+                :string_count, :first_64_hex, :first_256_sha256, :prefix_4k_sha256,
+                :suffix_4k_sha256, :middle_4k_sha256, :entropy, :printable_ratio,
+                :zero_ratio, :sample_strings, :last_scanned
             )
         """, row)
 
-    def add_scan_history(
-        self,
-        root: str,
-        started: float,
-        found: int,
-        scanned: int,
-        skipped: int,
-        errors: int,
-    ) -> None:
+    def add_scan_history(self, root: str, started: float, found: int, scanned: int, skipped: int, errors: int) -> None:
         finished = time.time()
         self.db.execute("""
             INSERT INTO scan_history(started, finished, root, found, scanned, skipped, errors, elapsed)
@@ -148,32 +161,24 @@ class Database:
     def duplicate_hash_count(self) -> int:
         return int(self.db.execute("""
             SELECT COUNT(*) FROM (
-                SELECT sha256 FROM models
-                WHERE sha256 != ''
-                GROUP BY sha256
-                HAVING COUNT(*) > 1
+                SELECT sha256 FROM models WHERE sha256 != ''
+                GROUP BY sha256 HAVING COUNT(*) > 1
             )
         """).fetchone()[0])
 
     def duplicate_count_for_hash(self, sha256: str) -> int:
-        return int(self.db.execute("""
-            SELECT COUNT(*) FROM models WHERE sha256 = ? AND sha256 != ''
-        """, (sha256,)).fetchone()[0])
+        return int(self.db.execute("SELECT COUNT(*) FROM models WHERE sha256 = ? AND sha256 != ''", (sha256,)).fetchone()[0])
 
     def models_by_hash(self, sha256: str):
         return self.db.execute("""
             SELECT filename, folder, relative_path, path, size, filename_type, som_version, sha256
-            FROM models
-            WHERE sha256 = ?
-            ORDER BY folder, filename
+            FROM models WHERE sha256 = ? ORDER BY folder, filename
         """, (sha256,)).fetchall()
 
     def filename_type_counts(self) -> dict[str, int]:
         rows = self.db.execute("""
-            SELECT filename_type, COUNT(*) AS count
-            FROM models
-            GROUP BY filename_type
-            ORDER BY count DESC
+            SELECT filename_type, COUNT(*) AS count FROM models
+            GROUP BY filename_type ORDER BY count DESC
         """).fetchall()
         return {row["filename_type"]: row["count"] for row in rows}
 
@@ -181,102 +186,60 @@ class Database:
         rows = self.db.execute("""
             SELECT CASE WHEN som_version = '' THEN 'Unknown' ELSE som_version END AS version,
                    COUNT(*) AS count
-            FROM models
-            GROUP BY version
-            ORDER BY count DESC
+            FROM models GROUP BY version ORDER BY count DESC
         """).fetchall()
         return {row["version"]: row["count"] for row in rows}
 
     def folder_counts(self, limit: int = 25):
         return self.db.execute("""
-            SELECT folder, COUNT(*) AS count
-            FROM models
-            GROUP BY folder
-            ORDER BY count DESC
-            LIMIT ?
+            SELECT folder, COUNT(*) AS count FROM models
+            GROUP BY folder ORDER BY count DESC LIMIT ?
         """, (limit,)).fetchall()
 
     def folder_details(self, folder: str):
         return self.db.execute("""
-            SELECT
-                folder,
-                COUNT(*) AS count,
+            SELECT folder, COUNT(*) AS count,
                 COALESCE(SUM(size), 0) AS total_size,
                 COALESCE(AVG(size), 0) AS avg_size,
                 COALESCE(MIN(size), 0) AS min_size,
                 COALESCE(MAX(size), 0) AS max_size,
                 SUM(CASE WHEN filename_type = 'Numeric Product ID' THEN 1 ELSE 0 END) AS numeric_count,
                 SUM(CASE WHEN filename_type = 'Named Asset' THEN 1 ELSE 0 END) AS named_count,
-                COUNT(DISTINCT sha256) AS unique_hashes
-            FROM models
-            WHERE folder = ?
-            GROUP BY folder
+                COUNT(DISTINCT sha256) AS unique_hashes,
+                COALESCE(AVG(entropy), 0) AS avg_entropy,
+                COALESCE(AVG(printable_ratio), 0) AS avg_printable_ratio,
+                COALESCE(AVG(zero_ratio), 0) AS avg_zero_ratio
+            FROM models WHERE folder = ? GROUP BY folder
         """, (folder,)).fetchone()
 
     def models_in_folder(self, folder: str, limit: int = 100):
         return self.db.execute("""
             SELECT filename, folder, relative_path, path, size, filename_type, som_version, sha256
-            FROM models
-            WHERE folder = ?
-            ORDER BY filename
-            LIMIT ?
+            FROM models WHERE folder = ? ORDER BY filename LIMIT ?
         """, (folder, limit)).fetchall()
 
     def size_stats(self) -> dict[str, Any]:
         row = self.db.execute("""
-            SELECT
-                COUNT(*) AS total,
-                COALESCE(SUM(size), 0) AS total_size,
+            SELECT COUNT(*) AS total, COALESCE(SUM(size), 0) AS total_size,
                 COALESCE(AVG(size), 0) AS avg_size,
                 COALESCE(MIN(size), 0) AS min_size,
                 COALESCE(MAX(size), 0) AS max_size
             FROM models
         """).fetchone()
-
-        largest = self.db.execute("""
-            SELECT filename, folder, size, path
-            FROM models
-            ORDER BY size DESC
-            LIMIT 1
-        """).fetchone()
-
-        smallest = self.db.execute("""
-            SELECT filename, folder, size, path
-            FROM models
-            ORDER BY size ASC
-            LIMIT 1
-        """).fetchone()
-
-        return {
-            "total": row["total"],
-            "total_size": row["total_size"],
-            "avg_size": row["avg_size"],
-            "min_size": row["min_size"],
-            "max_size": row["max_size"],
-            "largest": largest,
-            "smallest": smallest,
-        }
+        largest = self.db.execute("SELECT filename, folder, size, path FROM models ORDER BY size DESC LIMIT 1").fetchone()
+        smallest = self.db.execute("SELECT filename, folder, size, path FROM models ORDER BY size ASC LIMIT 1").fetchone()
+        return dict(row) | {"largest": largest, "smallest": smallest}
 
     def latest_scan(self):
-        return self.db.execute("""
-            SELECT *
-            FROM scan_history
-            ORDER BY id DESC
-            LIMIT 1
-        """).fetchone()
+        return self.db.execute("SELECT * FROM scan_history ORDER BY id DESC LIMIT 1").fetchone()
 
     def search(self, term: str, limit: int = 100):
         like = f"%{term}%"
         return self.db.execute("""
             SELECT filename, folder, relative_path, path, size, filename_type, som_version, sha256
             FROM models
-            WHERE filename LIKE ?
-               OR folder LIKE ?
-               OR relative_path LIKE ?
-               OR path LIKE ?
-               OR sha256 LIKE ?
-            ORDER BY folder, filename
-            LIMIT ?
+            WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR path LIKE ? OR sha256 LIKE ?
+            ORDER BY folder, filename LIMIT ?
         """, (like, like, like, like, like, limit)).fetchall()
 
     def get_model_by_path(self, path: str):
@@ -285,66 +248,44 @@ class Database:
     def get_model_by_relative_or_filename(self, query: str):
         return self.db.execute("""
             SELECT * FROM models
-            WHERE relative_path = ?
-               OR filename = ?
-               OR path = ?
-            ORDER BY relative_path
-            LIMIT 1
+            WHERE relative_path = ? OR filename = ? OR path = ?
+            ORDER BY relative_path LIMIT 1
         """, (query, query, query)).fetchone()
 
     def duplicate_hashes(self, limit: int = 100):
         return self.db.execute("""
             SELECT sha256, COUNT(*) AS count, SUM(size) AS total_size
-            FROM models
-            WHERE sha256 != ''
-            GROUP BY sha256
-            HAVING COUNT(*) > 1
-            ORDER BY count DESC, total_size DESC
-            LIMIT ?
-        """, (limit,)).fetchall()
-
-    def exact_duplicate_groups(self, limit: int = 100):
-        return self.duplicate_hashes(limit)
-
-    def same_size_groups(self, limit: int = 100):
-        return self.db.execute("""
-            SELECT size, COUNT(*) AS count
-            FROM models
-            GROUP BY size
-            HAVING COUNT(*) > 1
-            ORDER BY count DESC, size DESC
-            LIMIT ?
-        """, (limit,)).fetchall()
-
-    def same_first256_groups(self, limit: int = 100):
-        return self.db.execute("""
-            SELECT first_256_sha256, COUNT(*) AS count
-            FROM models
-            WHERE first_256_sha256 != ''
-            GROUP BY first_256_sha256
-            HAVING COUNT(*) > 1
-            ORDER BY count DESC
-            LIMIT ?
+            FROM models WHERE sha256 != ''
+            GROUP BY sha256 HAVING COUNT(*) > 1
+            ORDER BY count DESC, total_size DESC LIMIT ?
         """, (limit,)).fetchall()
 
     def model_comparison_candidates(self, path: str, limit: int = 100):
         model = self.get_model_by_path(path)
         if not model:
             return []
-
         return self.db.execute("""
             SELECT *,
                 CASE WHEN sha256 = ? AND sha256 != '' THEN 100 ELSE 0 END
-              + CASE WHEN first_256_sha256 = ? AND first_256_sha256 != '' THEN 35 ELSE 0 END
-              + CASE WHEN size = ? THEN 20 ELSE 0 END
-              + CASE WHEN folder = ? THEN 10 ELSE 0 END
-              + CASE WHEN filename_type = ? THEN 5 ELSE 0 END
-              + CASE WHEN som_version = ? AND som_version != '' THEN 5 ELSE 0 END
+              + CASE WHEN prefix_4k_sha256 = ? AND prefix_4k_sha256 != '' THEN 45 ELSE 0 END
+              + CASE WHEN suffix_4k_sha256 = ? AND suffix_4k_sha256 != '' THEN 35 ELSE 0 END
+              + CASE WHEN middle_4k_sha256 = ? AND middle_4k_sha256 != '' THEN 25 ELSE 0 END
+              + CASE WHEN first_256_sha256 = ? AND first_256_sha256 != '' THEN 20 ELSE 0 END
+              + CASE WHEN size = ? THEN 15 ELSE 0 END
+              + CASE WHEN folder = ? THEN 8 ELSE 0 END
+              + CASE WHEN filename_type = ? THEN 4 ELSE 0 END
+              + CASE WHEN ABS(entropy - ?) < 0.05 THEN 4 ELSE 0 END
+              + CASE WHEN ABS(printable_ratio - ?) < 0.01 THEN 3 ELSE 0 END
+              + CASE WHEN ABS(zero_ratio - ?) < 0.01 THEN 3 ELSE 0 END
+              + CASE WHEN som_version = ? AND som_version != '' THEN 3 ELSE 0 END
                 AS score
             FROM models
             WHERE path != ?
               AND (
                     sha256 = ?
+                 OR prefix_4k_sha256 = ?
+                 OR suffix_4k_sha256 = ?
+                 OR middle_4k_sha256 = ?
                  OR first_256_sha256 = ?
                  OR size = ?
                  OR folder = ?
@@ -352,18 +293,13 @@ class Database:
             ORDER BY score DESC, size DESC, folder, filename
             LIMIT ?
         """, (
-            model["sha256"],
-            model["first_256_sha256"],
-            model["size"],
-            model["folder"],
-            model["filename_type"],
-            model["som_version"],
-            model["path"],
-            model["sha256"],
-            model["first_256_sha256"],
-            model["size"],
-            model["folder"],
-            limit,
+            model["sha256"], model["prefix_4k_sha256"], model["suffix_4k_sha256"],
+            model["middle_4k_sha256"], model["first_256_sha256"], model["size"],
+            model["folder"], model["filename_type"], model["entropy"],
+            model["printable_ratio"], model["zero_ratio"], model["som_version"],
+            model["path"], model["sha256"], model["prefix_4k_sha256"],
+            model["suffix_4k_sha256"], model["middle_4k_sha256"],
+            model["first_256_sha256"], model["size"], model["folder"], limit
         )).fetchall()
 
     def compare_two_models(self, path_a: str, path_b: str) -> dict[str, Any]:
@@ -373,12 +309,18 @@ class Database:
             return {"a": a, "b": b, "score": 0, "fields": []}
 
         checks = [
-            ("Exact SHA256", a["sha256"], b["sha256"], 50),
-            ("MD5", a["md5"], b["md5"], 15),
-            ("CRC32", str(a["crc32"]), str(b["crc32"]), 10),
-            ("File Size", str(a["size"]), str(b["size"]), 10),
-            ("First 256 Hash", a["first_256_sha256"], b["first_256_sha256"], 10),
+            ("Exact SHA256", a["sha256"], b["sha256"], 100),
+            ("MD5", a["md5"], b["md5"], 25),
+            ("CRC32", str(a["crc32"]), str(b["crc32"]), 15),
+            ("File Size", str(a["size"]), str(b["size"]), 15),
+            ("Prefix 4K Hash", a["prefix_4k_sha256"], b["prefix_4k_sha256"], 35),
+            ("Suffix 4K Hash", a["suffix_4k_sha256"], b["suffix_4k_sha256"], 30),
+            ("Middle 4K Hash", a["middle_4k_sha256"], b["middle_4k_sha256"], 20),
+            ("First 256 Hash", a["first_256_sha256"], b["first_256_sha256"], 15),
             ("First 64 Bytes", a["first_64_hex"], b["first_64_hex"], 5),
+            ("Entropy", f"{a['entropy']:.4f}", f"{b['entropy']:.4f}", 5 if abs(a["entropy"] - b["entropy"]) < 0.05 else 0),
+            ("Printable Ratio", f"{a['printable_ratio']:.4f}", f"{b['printable_ratio']:.4f}", 4 if abs(a["printable_ratio"] - b["printable_ratio"]) < 0.01 else 0),
+            ("Zero Ratio", f"{a['zero_ratio']:.4f}", f"{b['zero_ratio']:.4f}", 4 if abs(a["zero_ratio"] - b["zero_ratio"]) < 0.01 else 0),
             ("Folder", a["folder"], b["folder"], 2),
             ("Filename Type", a["filename_type"], b["filename_type"], 2),
             ("SOM Version", a["som_version"], b["som_version"], 2),
@@ -388,31 +330,23 @@ class Database:
         fields = []
         for label, va, vb, weight in checks:
             same = bool(va) and va == vb
+            if label in ("Entropy", "Printable Ratio", "Zero Ratio"):
+                same = weight > 0
             if same:
                 score += weight
-            fields.append({
-                "label": label,
-                "a": va,
-                "b": vb,
-                "same": same,
-                "weight": weight,
-            })
-
-        score = min(score, 100)
-        return {"a": a, "b": b, "score": score, "fields": fields}
+            fields.append({"label": label, "a": va, "b": vb, "same": same, "weight": weight})
+        return {"a": a, "b": b, "score": min(score, 100), "fields": fields}
 
     def folder_comparison(self, folder_a: str, folder_b: str) -> dict[str, Any]:
         a = self.folder_details(folder_a)
         b = self.folder_details(folder_b)
         overlap = self.db.execute("""
-            SELECT COUNT(*) AS count
-            FROM (
+            SELECT COUNT(*) AS count FROM (
                 SELECT sha256 FROM models WHERE folder = ? AND sha256 != ''
                 INTERSECT
                 SELECT sha256 FROM models WHERE folder = ? AND sha256 != ''
             )
         """, (folder_a, folder_b)).fetchone()["count"]
-
         return {"a": a, "b": b, "shared_hashes": overlap}
 
     def begin(self) -> None:

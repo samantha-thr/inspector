@@ -24,13 +24,11 @@ def hash_file(path: Path) -> tuple[str, str, int]:
     sha = hashlib.sha256()
     md5 = hashlib.md5()
     crc = 0
-
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(HASH_CHUNK_SIZE), b""):
             sha.update(chunk)
             md5.update(chunk)
             crc = zlib.crc32(chunk, crc)
-
     return sha.hexdigest(), md5.hexdigest(), crc & 0xFFFFFFFF
 
 
@@ -48,38 +46,26 @@ def safe_relative_path(path: Path, root: Path) -> str:
 def scan_folder(root: str | Path, progress_callback: Optional[Callable[[dict], None]] = None) -> dict:
     root = Path(root).resolve()
     started = time.time()
-
     db = Database()
     files = discover_models(root)
     total = len(files)
     existing = db.get_existing_map()
-
-    scanned = 0
-    skipped = 0
-    errors = 0
-    batch_count = 0
-
+    scanned = skipped = errors = batch_count = 0
     db.begin()
 
     for index, file_path in enumerate(files, 1):
         status = "Unknown"
-
         try:
             stat = file_path.stat()
             path_key = str(file_path.resolve())
             existing_row = existing.get(path_key)
 
-            if (
-                existing_row
-                and int(existing_row["size"]) == stat.st_size
-                and float(existing_row["mtime"]) == stat.st_mtime
-            ):
+            if existing_row and int(existing_row["size"]) == stat.st_size and float(existing_row["mtime"]) == stat.st_mtime:
                 skipped += 1
                 status = "Skipped"
             else:
                 sha256, md5, crc32 = hash_file(file_path)
-                header_info = inspect_model_header(file_path)
-
+                info = inspect_model_header(file_path)
                 db.upsert_model({
                     "path": path_key,
                     "root": str(root),
@@ -92,23 +78,27 @@ def scan_folder(root: str | Path, progress_callback: Optional[Callable[[dict], N
                     "md5": md5,
                     "crc32": crc32,
                     "filename_type": classify_filename(file_path),
-                    "som_version": header_info.get("som_version", ""),
-                    "header": header_info.get("header", ""),
-                    "string_count": header_info.get("string_count", 0),
-                    "first_64_hex": header_info.get("first_64_hex", ""),
-                    "first_256_sha256": header_info.get("first_256_sha256", ""),
+                    "som_version": info.get("som_version", ""),
+                    "header": info.get("header", ""),
+                    "string_count": info.get("full_strings_count", info.get("string_count", 0)),
+                    "first_64_hex": info.get("first_64_hex", ""),
+                    "first_256_sha256": info.get("first_256_sha256", ""),
+                    "prefix_4k_sha256": info.get("prefix_4k_sha256", ""),
+                    "suffix_4k_sha256": info.get("suffix_4k_sha256", ""),
+                    "middle_4k_sha256": info.get("middle_4k_sha256", ""),
+                    "entropy": info.get("entropy", 0.0),
+                    "printable_ratio": info.get("printable_ratio", 0.0),
+                    "zero_ratio": info.get("zero_ratio", 0.0),
+                    "sample_strings": info.get("sample_strings", ""),
                     "last_scanned": time.time(),
                 })
-
                 scanned += 1
                 batch_count += 1
                 status = "Hashed"
-
                 if batch_count >= BATCH_SIZE:
                     db.commit()
                     db.begin()
                     batch_count = 0
-
         except Exception:
             errors += 1
             status = "Error"
@@ -131,7 +121,6 @@ def scan_folder(root: str | Path, progress_callback: Optional[Callable[[dict], N
 
     db.commit()
     db.add_scan_history(str(root), started, total, scanned, skipped, errors)
-
     summary = {
         "root": str(root),
         "found": total,
@@ -145,6 +134,5 @@ def scan_folder(root: str | Path, progress_callback: Optional[Callable[[dict], N
         "som_versions": db.som_version_counts(),
         "size_stats": db.size_stats(),
     }
-
     db.close()
     return summary
