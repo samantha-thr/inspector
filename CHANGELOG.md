@@ -1,15 +1,13 @@
 # Changelog
 
-## v1.7.2
+## v2.0.0
 
-- Fixed `sqlite3.OperationalError: cannot start a transaction within a transaction`.
-- Committed table-clearing operations before starting batched inserts.
-- Applied transaction safety to both texture-link and family rebuilds.
-
-## v1.7.1
-
-- Reworked model-texture relationship building.
-- Added fast PID-based texture linking.
-- Still checks official/named models for matching external DDS textures.
-- Marks likely baked-texture models when no DDS candidate exists.
-- Adds model texture relationship status table.
+- Clean v2 architecture.
+- New database file: `database/inspector_v2.db`.
+- Stable schema for models, textures, links, statuses, and families.
+- Full/incremental model and texture scanning.
+- DDS metadata support.
+- There-aware PID texture linking.
+- Named/official model texture fallback checks.
+- Model family clustering.
+- Simplified UI with consistent progress.

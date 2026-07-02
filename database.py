@@ -5,335 +5,192 @@ import time
 from pathlib import Path
 from typing import Any
 
-from config import DATABASE_PATH
+from config import DATABASE_PATH, SCHEMA_VERSION
 
 
 class Database:
-    def __init__(self, db_path: Path = DATABASE_PATH):
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.path = db_path
-        self.db = sqlite3.connect(str(db_path))
+    def __init__(self, path: Path = DATABASE_PATH):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
+        self.db = sqlite3.connect(str(path))
         self.db.row_factory = sqlite3.Row
-        self._create_schema()
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")
+        self.create_schema()
 
-    def _columns(self, table: str) -> set[str]:
-        return {row["name"] for row in self.db.execute(f"PRAGMA table_info({table})").fetchall()}
+    def close(self): self.db.close()
+    def commit(self): self.db.commit()
+    def begin(self): self.db.execute("BEGIN")
+    def set_setting(self, key: str, value: str): self.db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, value))
+    def get_setting(self, key: str, default: str = "") -> str:
+        row = self.db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
 
-    def _add_column_if_missing(self, table: str, column: str, definition: str) -> None:
-        if column not in self._columns(table):
-            self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    def create_schema(self):
+        self.db.executescript("""
+        CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
-    def _create_schema(self) -> None:
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS models(
-                path TEXT PRIMARY KEY, root TEXT NOT NULL DEFAULT '', relative_path TEXT NOT NULL DEFAULT '',
-                filename TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL DEFAULT '', size INTEGER NOT NULL DEFAULT 0,
-                mtime REAL NOT NULL DEFAULT 0, sha256 TEXT NOT NULL DEFAULT '', md5 TEXT NOT NULL DEFAULT '',
-                crc32 INTEGER NOT NULL DEFAULT 0, filename_type TEXT NOT NULL DEFAULT 'Unknown',
-                som_version TEXT NOT NULL DEFAULT '', header TEXT NOT NULL DEFAULT '', string_count INTEGER NOT NULL DEFAULT 0,
-                first_64_hex TEXT NOT NULL DEFAULT '', first_256_sha256 TEXT NOT NULL DEFAULT '',
-                prefix_4k_sha256 TEXT NOT NULL DEFAULT '', suffix_4k_sha256 TEXT NOT NULL DEFAULT '',
-                middle_4k_sha256 TEXT NOT NULL DEFAULT '', entropy REAL NOT NULL DEFAULT 0,
-                printable_ratio REAL NOT NULL DEFAULT 0, zero_ratio REAL NOT NULL DEFAULT 0,
-                sample_strings TEXT NOT NULL DEFAULT '', last_scanned REAL NOT NULL DEFAULT 0
-            )
+        CREATE TABLE IF NOT EXISTS models(
+            path TEXT PRIMARY KEY, root TEXT, relative_path TEXT, filename TEXT, folder TEXT,
+            size INTEGER, mtime REAL, sha256 TEXT, md5 TEXT, crc32 INTEGER, filename_type TEXT,
+            som_version TEXT, header TEXT, string_count INTEGER, sample_strings TEXT,
+            first_64_hex TEXT, first_256_sha256 TEXT, prefix_4k_sha256 TEXT,
+            middle_4k_sha256 TEXT, suffix_4k_sha256 TEXT,
+            entropy REAL, printable_ratio REAL, zero_ratio REAL, last_scanned REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS textures(
+            path TEXT PRIMARY KEY, root TEXT, relative_path TEXT, filename TEXT, folder TEXT,
+            extension TEXT, size INTEGER, mtime REAL, sha256 TEXT, md5 TEXT, crc32 INTEGER,
+            width INTEGER, height INTEGER, mode TEXT, has_alpha INTEGER,
+            avg_r REAL, avg_g REAL, avg_b REAL, avg_a REAL, ahash TEXT, analysis_status TEXT,
+            is_dds INTEGER, dds_width INTEGER, dds_height INTEGER, dds_mipmaps INTEGER,
+            dds_fourcc TEXT, dds_format TEXT, dds_rgb_bits INTEGER, dds_has_alpha INTEGER,
+            dds_is_cubemap INTEGER, dds_is_volume INTEGER, dds_estimated_vram INTEGER,
+            dds_header_status TEXT, last_scanned REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS model_texture_links(
+            model_path TEXT NOT NULL, texture_path TEXT NOT NULL, score INTEGER,
+            method TEXT, reason TEXT, created REAL, PRIMARY KEY(model_path, texture_path)
+        );
+
+        CREATE TABLE IF NOT EXISTS model_texture_status(
+            model_path TEXT PRIMARY KEY, status TEXT, link_count INTEGER, note TEXT, updated REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS model_families(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, method TEXT, confidence INTEGER,
+            member_count INTEGER, created REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS model_family_members(
+            family_id INTEGER, model_path TEXT, confidence INTEGER, PRIMARY KEY(family_id, model_path)
+        );
+
+        CREATE TABLE IF NOT EXISTS scan_history(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, started REAL, finished REAL, root TEXT,
+            found INTEGER, scanned INTEGER, skipped INTEGER, errors INTEGER, elapsed REAL, scan_type TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_models_folder ON models(folder);
+        CREATE INDEX IF NOT EXISTS idx_models_filename ON models(filename);
+        CREATE INDEX IF NOT EXISTS idx_models_sha256 ON models(sha256);
+        CREATE INDEX IF NOT EXISTS idx_models_prefix ON models(prefix_4k_sha256);
+        CREATE INDEX IF NOT EXISTS idx_models_suffix ON models(suffix_4k_sha256);
+        CREATE INDEX IF NOT EXISTS idx_models_middle ON models(middle_4k_sha256);
+
+        CREATE INDEX IF NOT EXISTS idx_textures_folder ON textures(folder);
+        CREATE INDEX IF NOT EXISTS idx_textures_filename ON textures(filename);
+        CREATE INDEX IF NOT EXISTS idx_textures_sha256 ON textures(sha256);
+        CREATE INDEX IF NOT EXISTS idx_textures_ahash ON textures(ahash);
+        CREATE INDEX IF NOT EXISTS idx_textures_format ON textures(dds_format);
+
+        CREATE INDEX IF NOT EXISTS idx_links_model ON model_texture_links(model_path);
+        CREATE INDEX IF NOT EXISTS idx_links_texture ON model_texture_links(texture_path);
+        CREATE INDEX IF NOT EXISTS idx_status_status ON model_texture_status(status);
+        CREATE INDEX IF NOT EXISTS idx_fam_member_family ON model_family_members(family_id);
+        CREATE INDEX IF NOT EXISTS idx_fam_member_model ON model_family_members(model_path);
         """)
-        for column, definition in {
-            "root": "TEXT NOT NULL DEFAULT ''", "relative_path": "TEXT NOT NULL DEFAULT ''",
-            "filename": "TEXT NOT NULL DEFAULT ''", "folder": "TEXT NOT NULL DEFAULT ''",
-            "mtime": "REAL NOT NULL DEFAULT 0", "filename_type": "TEXT NOT NULL DEFAULT 'Unknown'",
-            "som_version": "TEXT NOT NULL DEFAULT ''", "header": "TEXT NOT NULL DEFAULT ''",
-            "string_count": "INTEGER NOT NULL DEFAULT 0", "first_64_hex": "TEXT NOT NULL DEFAULT ''",
-            "first_256_sha256": "TEXT NOT NULL DEFAULT ''", "prefix_4k_sha256": "TEXT NOT NULL DEFAULT ''",
-            "suffix_4k_sha256": "TEXT NOT NULL DEFAULT ''", "middle_4k_sha256": "TEXT NOT NULL DEFAULT ''",
-            "entropy": "REAL NOT NULL DEFAULT 0", "printable_ratio": "REAL NOT NULL DEFAULT 0",
-            "zero_ratio": "REAL NOT NULL DEFAULT 0", "sample_strings": "TEXT NOT NULL DEFAULT ''",
-            "last_scanned": "REAL NOT NULL DEFAULT 0",
-        }.items():
-            self._add_column_if_missing("models", column, definition)
+        self.set_setting("schema_version", str(SCHEMA_VERSION))
+        self.commit()
 
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS textures(
-                path TEXT PRIMARY KEY, root TEXT NOT NULL DEFAULT '', relative_path TEXT NOT NULL DEFAULT '',
-                filename TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL DEFAULT '', extension TEXT NOT NULL DEFAULT '',
-                size INTEGER NOT NULL DEFAULT 0, mtime REAL NOT NULL DEFAULT 0, sha256 TEXT NOT NULL DEFAULT '',
-                md5 TEXT NOT NULL DEFAULT '', crc32 INTEGER NOT NULL DEFAULT 0, width INTEGER NOT NULL DEFAULT 0,
-                height INTEGER NOT NULL DEFAULT 0, mode TEXT NOT NULL DEFAULT '', has_alpha INTEGER NOT NULL DEFAULT 0,
-                avg_r REAL NOT NULL DEFAULT 0, avg_g REAL NOT NULL DEFAULT 0, avg_b REAL NOT NULL DEFAULT 0,
-                avg_a REAL NOT NULL DEFAULT 255, ahash TEXT NOT NULL DEFAULT '', analysis_status TEXT NOT NULL DEFAULT '',
-                is_dds INTEGER NOT NULL DEFAULT 0, dds_width INTEGER NOT NULL DEFAULT 0, dds_height INTEGER NOT NULL DEFAULT 0,
-                dds_mipmaps INTEGER NOT NULL DEFAULT 0, dds_fourcc TEXT NOT NULL DEFAULT '', dds_format TEXT NOT NULL DEFAULT '',
-                dds_rgb_bits INTEGER NOT NULL DEFAULT 0, dds_has_alpha INTEGER NOT NULL DEFAULT 0,
-                dds_is_cubemap INTEGER NOT NULL DEFAULT 0, dds_is_volume INTEGER NOT NULL DEFAULT 0,
-                dds_header_flags TEXT NOT NULL DEFAULT '', dds_caps2 TEXT NOT NULL DEFAULT '',
-                dds_estimated_vram INTEGER NOT NULL DEFAULT 0, dds_header_status TEXT NOT NULL DEFAULT '',
-                last_scanned REAL NOT NULL DEFAULT 0
-            )
-        """)
-        for column, definition in {
-            "root": "TEXT NOT NULL DEFAULT ''", "relative_path": "TEXT NOT NULL DEFAULT ''",
-            "filename": "TEXT NOT NULL DEFAULT ''", "folder": "TEXT NOT NULL DEFAULT ''",
-            "extension": "TEXT NOT NULL DEFAULT ''", "size": "INTEGER NOT NULL DEFAULT 0",
-            "mtime": "REAL NOT NULL DEFAULT 0", "sha256": "TEXT NOT NULL DEFAULT ''",
-            "md5": "TEXT NOT NULL DEFAULT ''", "crc32": "INTEGER NOT NULL DEFAULT 0",
-            "width": "INTEGER NOT NULL DEFAULT 0", "height": "INTEGER NOT NULL DEFAULT 0",
-            "mode": "TEXT NOT NULL DEFAULT ''", "has_alpha": "INTEGER NOT NULL DEFAULT 0",
-            "avg_r": "REAL NOT NULL DEFAULT 0", "avg_g": "REAL NOT NULL DEFAULT 0",
-            "avg_b": "REAL NOT NULL DEFAULT 0", "avg_a": "REAL NOT NULL DEFAULT 255",
-            "ahash": "TEXT NOT NULL DEFAULT ''", "analysis_status": "TEXT NOT NULL DEFAULT ''",
-            "is_dds": "INTEGER NOT NULL DEFAULT 0", "dds_width": "INTEGER NOT NULL DEFAULT 0",
-            "dds_height": "INTEGER NOT NULL DEFAULT 0", "dds_mipmaps": "INTEGER NOT NULL DEFAULT 0",
-            "dds_fourcc": "TEXT NOT NULL DEFAULT ''", "dds_format": "TEXT NOT NULL DEFAULT ''",
-            "dds_rgb_bits": "INTEGER NOT NULL DEFAULT 0", "dds_has_alpha": "INTEGER NOT NULL DEFAULT 0",
-            "dds_is_cubemap": "INTEGER NOT NULL DEFAULT 0", "dds_is_volume": "INTEGER NOT NULL DEFAULT 0",
-            "dds_header_flags": "TEXT NOT NULL DEFAULT ''", "dds_caps2": "TEXT NOT NULL DEFAULT ''",
-            "dds_estimated_vram": "INTEGER NOT NULL DEFAULT 0", "dds_header_status": "TEXT NOT NULL DEFAULT ''",
-            "last_scanned": "REAL NOT NULL DEFAULT 0",
-        }.items():
-            self._add_column_if_missing("textures", column, definition)
-
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS model_texture_links(
-                model_path TEXT NOT NULL, texture_path TEXT NOT NULL, score INTEGER NOT NULL DEFAULT 0,
-                method TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', created REAL NOT NULL DEFAULT 0,
-                PRIMARY KEY(model_path, texture_path)
-            )
-        """)
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS model_texture_status(
-                model_path TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT '', link_count INTEGER NOT NULL DEFAULT 0,
-                note TEXT NOT NULL DEFAULT '', updated REAL NOT NULL DEFAULT 0
-            )
-        """)
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS model_families(
-                id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', method TEXT NOT NULL DEFAULT '',
-                confidence INTEGER NOT NULL DEFAULT 0, member_count INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL DEFAULT 0
-            )
-        """)
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS model_family_members(
-                family_id INTEGER NOT NULL, model_path TEXT NOT NULL, confidence INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY(family_id, model_path)
-            )
-        """)
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS scan_history(
-                id INTEGER PRIMARY KEY AUTOINCREMENT, started REAL NOT NULL, finished REAL NOT NULL,
-                root TEXT NOT NULL, found INTEGER NOT NULL, scanned INTEGER NOT NULL, skipped INTEGER NOT NULL,
-                errors INTEGER NOT NULL DEFAULT 0, elapsed REAL NOT NULL, scan_type TEXT NOT NULL DEFAULT 'model'
-            )
-        """)
-        if "errors" not in self._columns("scan_history"):
-            self.db.execute("ALTER TABLE scan_history ADD COLUMN errors INTEGER NOT NULL DEFAULT 0")
-        if "scan_type" not in self._columns("scan_history"):
-            self.db.execute("ALTER TABLE scan_history ADD COLUMN scan_type TEXT NOT NULL DEFAULT 'model'")
-        self.db.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-
-        for stmt in [
-            "CREATE INDEX IF NOT EXISTS idx_models_sha256 ON models(sha256)",
-            "CREATE INDEX IF NOT EXISTS idx_models_folder ON models(folder)",
-            "CREATE INDEX IF NOT EXISTS idx_models_filename ON models(filename)",
-            "CREATE INDEX IF NOT EXISTS idx_models_prefix4k ON models(prefix_4k_sha256)",
-            "CREATE INDEX IF NOT EXISTS idx_models_suffix4k ON models(suffix_4k_sha256)",
-            "CREATE INDEX IF NOT EXISTS idx_models_middle4k ON models(middle_4k_sha256)",
-            "CREATE INDEX IF NOT EXISTS idx_textures_sha256 ON textures(sha256)",
-            "CREATE INDEX IF NOT EXISTS idx_textures_folder ON textures(folder)",
-            "CREATE INDEX IF NOT EXISTS idx_textures_filename ON textures(filename)",
-            "CREATE INDEX IF NOT EXISTS idx_textures_dds_format ON textures(dds_format)",
-            "CREATE INDEX IF NOT EXISTS idx_mtl_model ON model_texture_links(model_path)",
-            "CREATE INDEX IF NOT EXISTS idx_mtl_texture ON model_texture_links(texture_path)",
-            "CREATE INDEX IF NOT EXISTS idx_mts_status ON model_texture_status(status)",
-            "CREATE INDEX IF NOT EXISTS idx_family_members_family ON model_family_members(family_id)",
-            "CREATE INDEX IF NOT EXISTS idx_family_members_model ON model_family_members(model_path)",
-        ]:
-            self.db.execute(stmt)
-        self.db.commit()
-
-    def begin(self) -> None: self.db.execute("BEGIN")
-    def commit(self) -> None: self.db.commit()
-    def close(self) -> None: self.db.close()
-
-    # Generic/status
-    def add_scan_history(self, root: str, started: float, found: int, scanned: int, skipped: int, errors: int, scan_type: str = "model") -> None:
+    # scans
+    def add_scan_history(self, root: str, started: float, found: int, scanned: int, skipped: int, errors: int, scan_type: str):
         finished = time.time()
-        self.db.execute("INSERT INTO scan_history(started, finished, root, found, scanned, skipped, errors, elapsed, scan_type) VALUES(?,?,?,?,?,?,?,?,?)",
-                        (started, finished, root, found, scanned, skipped, errors, finished - started, scan_type))
-        self.set_setting(f"last_{scan_type}_scan_root", root)
-        self.db.commit()
+        self.db.execute("INSERT INTO scan_history(started,finished,root,found,scanned,skipped,errors,elapsed,scan_type) VALUES(?,?,?,?,?,?,?,?,?)",
+                        (started, finished, root, found, scanned, skipped, errors, finished-started, scan_type))
+        self.commit()
 
-    def set_setting(self, key: str, value: str) -> None:
-        self.db.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)", (key, value))
+    def existing_models(self): return {r["path"]: r for r in self.db.execute("SELECT path,size,mtime FROM models")}
+    def existing_textures(self): return {r["path"]: r for r in self.db.execute("SELECT path,size,mtime FROM textures")}
+    def upsert_model(self, row: dict[str, Any]):
+        self.db.execute("""INSERT OR REPLACE INTO models(path,root,relative_path,filename,folder,size,mtime,sha256,md5,crc32,filename_type,
+            som_version,header,string_count,sample_strings,first_64_hex,first_256_sha256,prefix_4k_sha256,middle_4k_sha256,suffix_4k_sha256,
+            entropy,printable_ratio,zero_ratio,last_scanned)
+            VALUES(:path,:root,:relative_path,:filename,:folder,:size,:mtime,:sha256,:md5,:crc32,:filename_type,
+            :som_version,:header,:string_count,:sample_strings,:first_64_hex,:first_256_sha256,:prefix_4k_sha256,:middle_4k_sha256,:suffix_4k_sha256,
+            :entropy,:printable_ratio,:zero_ratio,:last_scanned)""", row)
+    def upsert_texture(self, row: dict[str, Any]):
+        self.db.execute("""INSERT OR REPLACE INTO textures(path,root,relative_path,filename,folder,extension,size,mtime,sha256,md5,crc32,
+            width,height,mode,has_alpha,avg_r,avg_g,avg_b,avg_a,ahash,analysis_status,is_dds,dds_width,dds_height,dds_mipmaps,
+            dds_fourcc,dds_format,dds_rgb_bits,dds_has_alpha,dds_is_cubemap,dds_is_volume,dds_estimated_vram,dds_header_status,last_scanned)
+            VALUES(:path,:root,:relative_path,:filename,:folder,:extension,:size,:mtime,:sha256,:md5,:crc32,
+            :width,:height,:mode,:has_alpha,:avg_r,:avg_g,:avg_b,:avg_a,:ahash,:analysis_status,:is_dds,:dds_width,:dds_height,:dds_mipmaps,
+            :dds_fourcc,:dds_format,:dds_rgb_bits,:dds_has_alpha,:dds_is_cubemap,:dds_is_volume,:dds_estimated_vram,:dds_header_status,:last_scanned)""", row)
 
-    def latest_scan(self, scan_type: str | None = None):
-        if scan_type:
-            return self.db.execute("SELECT * FROM scan_history WHERE scan_type = ? ORDER BY id DESC LIMIT 1", (scan_type,)).fetchone()
-        return self.db.execute("SELECT * FROM scan_history ORDER BY id DESC LIMIT 1").fetchone()
-
-    # Model scan/upsert
-    def get_existing_map(self): return {r["path"]: r for r in self.db.execute("SELECT path, size, mtime FROM models").fetchall()}
-    def upsert_model(self, row: dict[str, Any]) -> None:
-        self.db.execute("""
-            INSERT OR REPLACE INTO models(path, root, relative_path, filename, folder, size, mtime, sha256, md5, crc32,
-                filename_type, som_version, header, string_count, first_64_hex, first_256_sha256, prefix_4k_sha256,
-                suffix_4k_sha256, middle_4k_sha256, entropy, printable_ratio, zero_ratio, sample_strings, last_scanned)
-            VALUES(:path, :root, :relative_path, :filename, :folder, :size, :mtime, :sha256, :md5, :crc32,
-                :filename_type, :som_version, :header, :string_count, :first_64_hex, :first_256_sha256, :prefix_4k_sha256,
-                :suffix_4k_sha256, :middle_4k_sha256, :entropy, :printable_ratio, :zero_ratio, :sample_strings, :last_scanned)
-        """, row)
-
-    # Texture scan/upsert
-    def get_existing_texture_map(self): return {r["path"]: r for r in self.db.execute("SELECT path, size, mtime FROM textures").fetchall()}
-    def upsert_texture(self, row: dict[str, Any]) -> None:
-        self.db.execute("""
-            INSERT OR REPLACE INTO textures(path, root, relative_path, filename, folder, extension, size, mtime,
-                sha256, md5, crc32, width, height, mode, has_alpha, avg_r, avg_g, avg_b, avg_a, ahash, analysis_status,
-                is_dds, dds_width, dds_height, dds_mipmaps, dds_fourcc, dds_format, dds_rgb_bits, dds_has_alpha,
-                dds_is_cubemap, dds_is_volume, dds_header_flags, dds_caps2, dds_estimated_vram, dds_header_status, last_scanned)
-            VALUES(:path, :root, :relative_path, :filename, :folder, :extension, :size, :mtime,
-                :sha256, :md5, :crc32, :width, :height, :mode, :has_alpha, :avg_r, :avg_g, :avg_b, :avg_a, :ahash, :analysis_status,
-                :is_dds, :dds_width, :dds_height, :dds_mipmaps, :dds_fourcc, :dds_format, :dds_rgb_bits, :dds_has_alpha,
-                :dds_is_cubemap, :dds_is_volume, :dds_header_flags, :dds_caps2, :dds_estimated_vram, :dds_header_status, :last_scanned)
-        """, row)
-
-    # Counts/stats
-    def count_models(self): return int(self.db.execute("SELECT COUNT(*) FROM models").fetchone()[0])
-    def count_textures(self): return int(self.db.execute("SELECT COUNT(*) FROM textures").fetchone()[0])
-    def duplicate_hash_count(self):
-        return int(self.db.execute("SELECT COUNT(*) FROM (SELECT sha256 FROM models WHERE sha256 != '' GROUP BY sha256 HAVING COUNT(*) > 1)").fetchone()[0])
-    def duplicate_count_for_hash(self, sha256: str):
-        return int(self.db.execute("SELECT COUNT(*) FROM models WHERE sha256 = ? AND sha256 != ''", (sha256,)).fetchone()[0])
-    def texture_stats(self):
-        return dict(self.db.execute("""SELECT COUNT(*) AS total, COALESCE(SUM(size),0) AS total_size, COALESCE(AVG(size),0) AS avg_size,
-                   COUNT(DISTINCT sha256) AS unique_hashes, SUM(CASE WHEN is_dds=1 THEN 1 ELSE 0 END) AS dds_count FROM textures""").fetchone())
-    def size_stats(self):
-        row = self.db.execute("SELECT COUNT(*) AS total, COALESCE(SUM(size),0) AS total_size, COALESCE(AVG(size),0) AS avg_size, COALESCE(MIN(size),0) AS min_size, COALESCE(MAX(size),0) AS max_size FROM models").fetchone()
-        largest = self.db.execute("SELECT filename, folder, size, path FROM models ORDER BY size DESC LIMIT 1").fetchone()
-        smallest = self.db.execute("SELECT filename, folder, size, path FROM models ORDER BY size ASC LIMIT 1").fetchone()
-        return dict(row) | {"largest": largest, "smallest": smallest}
-    def filename_type_counts(self):
-        return {r["filename_type"]: r["count"] for r in self.db.execute("SELECT filename_type, COUNT(*) AS count FROM models GROUP BY filename_type ORDER BY count DESC").fetchall()}
-    def som_version_counts(self):
-        return {r["version"]: r["count"] for r in self.db.execute("SELECT CASE WHEN som_version='' THEN 'Unknown' ELSE som_version END AS version, COUNT(*) AS count FROM models GROUP BY version ORDER BY count DESC").fetchall()}
-    def texture_format_counts(self):
-        return self.db.execute("SELECT CASE WHEN dds_format='' THEN extension ELSE dds_format END AS format, COUNT(*) AS count FROM textures GROUP BY format ORDER BY count DESC").fetchall()
-
-    # Model queries
-    def folder_counts(self, limit=25):
-        return self.db.execute("SELECT folder, COUNT(*) AS count FROM models GROUP BY folder ORDER BY count DESC LIMIT ?", (limit,)).fetchall()
-    def all_models_for_linking(self):
-        return self.db.execute("SELECT path, relative_path, filename, folder FROM models ORDER BY folder, filename").fetchall()
-    def models_in_folder(self, folder: str, limit=100):
-        return self.db.execute("SELECT filename, folder, relative_path, path, size, filename_type, som_version, sha256 FROM models WHERE folder=? ORDER BY filename LIMIT ?", (folder, limit)).fetchall()
-    def folder_details(self, folder: str):
-        return self.db.execute("""SELECT folder, COUNT(*) AS count, COALESCE(SUM(size),0) AS total_size, COALESCE(AVG(size),0) AS avg_size,
-            COALESCE(MIN(size),0) AS min_size, COALESCE(MAX(size),0) AS max_size,
-            SUM(CASE WHEN filename_type='Numeric Product ID' THEN 1 ELSE 0 END) AS numeric_count,
-            SUM(CASE WHEN filename_type='Named Asset' THEN 1 ELSE 0 END) AS named_count,
-            COUNT(DISTINCT sha256) AS unique_hashes, COALESCE(AVG(entropy),0) AS avg_entropy,
-            COALESCE(AVG(printable_ratio),0) AS avg_printable_ratio, COALESCE(AVG(zero_ratio),0) AS avg_zero_ratio
-            FROM models WHERE folder=? GROUP BY folder""", (folder,)).fetchone()
-    def search(self, term: str, limit=100):
-        like = f"%{term}%"
-        return self.db.execute("SELECT filename, folder, relative_path, path, size, filename_type, som_version, sha256 FROM models WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR path LIKE ? OR sha256 LIKE ? ORDER BY folder, filename LIMIT ?", (like,like,like,like,like,limit)).fetchall()
-    def get_model_by_path(self, path: str): return self.db.execute("SELECT * FROM models WHERE path=?", (path,)).fetchone()
-    def get_model_by_relative_or_filename(self, query: str):
-        return self.db.execute("SELECT * FROM models WHERE relative_path=? OR filename=? OR path=? ORDER BY relative_path LIMIT 1", (query,query,query)).fetchone()
-    def models_by_hash(self, sha256: str):
-        return self.db.execute("SELECT filename, folder, relative_path, path, size, filename_type, som_version, sha256 FROM models WHERE sha256=? ORDER BY folder, filename", (sha256,)).fetchall()
-    def duplicate_hashes(self, limit=100):
-        return self.db.execute("SELECT sha256, COUNT(*) AS count, SUM(size) AS total_size FROM models WHERE sha256!='' GROUP BY sha256 HAVING COUNT(*)>1 ORDER BY count DESC,total_size DESC LIMIT ?", (limit,)).fetchall()
-
-    # Comparisons
-    def model_comparison_candidates(self, path: str, limit=100):
-        model = self.get_model_by_path(path)
-        if not model: return []
-        return self.db.execute("""
-            SELECT *, CASE WHEN sha256=? AND sha256!='' THEN 100 ELSE 0 END
-            + CASE WHEN prefix_4k_sha256=? AND prefix_4k_sha256!='' THEN 45 ELSE 0 END
-            + CASE WHEN suffix_4k_sha256=? AND suffix_4k_sha256!='' THEN 35 ELSE 0 END
-            + CASE WHEN middle_4k_sha256=? AND middle_4k_sha256!='' THEN 25 ELSE 0 END
-            + CASE WHEN size=? THEN 15 ELSE 0 END
-            + CASE WHEN folder=? THEN 8 ELSE 0 END AS score
-            FROM models WHERE path!=? AND (sha256=? OR prefix_4k_sha256=? OR suffix_4k_sha256=? OR middle_4k_sha256=? OR size=? OR folder=?)
-            ORDER BY score DESC,size DESC,folder,filename LIMIT ?
-        """, (model["sha256"],model["prefix_4k_sha256"],model["suffix_4k_sha256"],model["middle_4k_sha256"],model["size"],model["folder"],model["path"],
-              model["sha256"],model["prefix_4k_sha256"],model["suffix_4k_sha256"],model["middle_4k_sha256"],model["size"],model["folder"],limit)).fetchall()
-    def compare_two_models(self, path_a: str, path_b: str):
-        a,b = self.get_model_by_path(path_a), self.get_model_by_path(path_b)
-        if not a or not b: return {"a":a,"b":b,"score":0,"fields":[]}
-        checks=[("Exact SHA256",a["sha256"],b["sha256"],100),("File Size",str(a["size"]),str(b["size"]),15),("Prefix 4K Hash",a["prefix_4k_sha256"],b["prefix_4k_sha256"],35),("Suffix 4K Hash",a["suffix_4k_sha256"],b["suffix_4k_sha256"],30),("Folder",a["folder"],b["folder"],2)]
-        score=0; fields=[]
-        for label,va,vb,w in checks:
-            same=bool(va) and va==vb
-            if same: score+=w
-            fields.append({"label":label,"a":va,"b":vb,"same":same,"weight":w})
-        return {"a":a,"b":b,"score":min(score,100),"fields":fields}
-    def folder_comparison(self, folder_a, folder_b):
-        a,b=self.folder_details(folder_a),self.folder_details(folder_b)
-        overlap=self.db.execute("SELECT COUNT(*) AS count FROM (SELECT sha256 FROM models WHERE folder=? AND sha256!='' INTERSECT SELECT sha256 FROM models WHERE folder=? AND sha256!='')",(folder_a,folder_b)).fetchone()["count"]
-        return {"a":a,"b":b,"shared_hashes":overlap}
-
-    # Texture queries
-    def textures_for_base_prefix(self, base: str, folder: str, limit=250):
-        return self.db.execute("""SELECT * FROM textures WHERE folder=? AND (filename LIKE ? OR filename LIKE ?) ORDER BY filename LIMIT ?""", (folder, f"{base}_%", f"{base}.%", limit)).fetchall()
-    def textures_for_named_model(self, base: str, folder: str, limit=250):
-        like1, like2, like3 = f"{base}_%", f"{base}.%", f"%{base}%"
-        return self.db.execute("""SELECT * FROM textures WHERE folder=? AND (filename LIKE ? OR filename LIKE ? OR filename LIKE ?) ORDER BY filename LIMIT ?""", (folder, like1, like2, like3, limit)).fetchall()
-    def textures_in_folder(self, folder: str, limit=5000):
-        return self.db.execute("SELECT * FROM textures WHERE folder=? ORDER BY filename LIMIT ?", (folder,limit)).fetchall()
-    def search_textures(self, term: str, limit=100):
-        like=f"%{term}%"
-        return self.db.execute("SELECT * FROM textures WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR path LIKE ? OR sha256 LIKE ? OR dds_format LIKE ? OR dds_fourcc LIKE ? ORDER BY folder,filename LIMIT ?", (like,like,like,like,like,like,like,limit)).fetchall()
-    def get_texture_by_relative_or_filename(self, query: str):
-        return self.db.execute("SELECT * FROM textures WHERE relative_path=? OR filename=? OR path=? ORDER BY relative_path LIMIT 1", (query,query,query)).fetchone()
-    def duplicate_texture_hashes(self, limit=100):
-        return self.db.execute("SELECT sha256, COUNT(*) AS count, SUM(size) AS total_size FROM textures WHERE sha256!='' GROUP BY sha256 HAVING COUNT(*)>1 ORDER BY count DESC,total_size DESC LIMIT ?", (limit,)).fetchall()
-    def textures_by_hash(self, sha256: str):
-        return self.db.execute("SELECT * FROM textures WHERE sha256=? ORDER BY folder,filename", (sha256,)).fetchall()
-    def similar_textures(self, path: str, limit=100):
-        tex = self.db.execute("SELECT * FROM textures WHERE path=?", (path,)).fetchone()
-        if not tex: return []
-        return self.db.execute("""SELECT *, CASE WHEN sha256=? AND sha256!='' THEN 100 ELSE 0 END
-            + CASE WHEN ahash=? AND ahash!='' THEN 45 ELSE 0 END
-            + CASE WHEN width=? AND width!=0 THEN 10 ELSE 0 END
-            + CASE WHEN height=? AND height!=0 THEN 10 ELSE 0 END
-            + CASE WHEN dds_format=? AND dds_format!='' THEN 10 ELSE 0 END AS score
-            FROM textures WHERE path!=? AND (sha256=? OR ahash=? OR (width=? AND height=?) OR dds_format=?)
-            ORDER BY score DESC,folder,filename LIMIT ?""", (tex["sha256"],tex["ahash"],tex["width"],tex["height"],tex["dds_format"],tex["path"],tex["sha256"],tex["ahash"],tex["width"],tex["height"],tex["dds_format"],limit)).fetchall()
-
-    # Relationships/status
-    def clear_model_texture_links(self): self.db.execute("DELETE FROM model_texture_links")
-    def clear_model_texture_status(self): self.db.execute("DELETE FROM model_texture_status")
-    def upsert_model_texture_link(self, model_path, texture_path, score, reason, method):
-        self.db.execute("INSERT OR REPLACE INTO model_texture_links(model_path,texture_path,score,method,reason,created) VALUES(?,?,?,?,?,?)", (model_path,texture_path,score,method,reason,time.time()))
-    def upsert_model_texture_status(self, model_path, status, link_count, note):
-        self.db.execute("INSERT OR REPLACE INTO model_texture_status(model_path,status,link_count,note,updated) VALUES(?,?,?,?,?)", (model_path,status,link_count,note,time.time()))
-    def model_texture_links_for_model(self, model_path, limit=100):
-        return self.db.execute("""SELECT l.*, t.relative_path AS texture_relative_path, t.filename AS texture_filename, t.dds_format, t.width, t.height, t.dds_width, t.dds_height, t.sha256
-            FROM model_texture_links l JOIN textures t ON t.path=l.texture_path WHERE l.model_path=? ORDER BY l.score DESC,t.relative_path LIMIT ?""", (model_path,limit)).fetchall()
-    def texture_links_for_texture(self, texture_path, limit=100):
-        return self.db.execute("""SELECT l.*, m.relative_path AS model_relative_path, m.filename AS model_filename, m.folder, m.sha256
-            FROM model_texture_links l JOIN models m ON m.path=l.model_path WHERE l.texture_path=? ORDER BY l.score DESC,m.relative_path LIMIT ?""", (texture_path,limit)).fetchall()
+    # counts/stats
+    def count_models(self): return self.db.execute("SELECT COUNT(*) FROM models").fetchone()[0]
+    def count_textures(self): return self.db.execute("SELECT COUNT(*) FROM textures").fetchone()[0]
     def relationship_stats(self):
-        row=dict(self.db.execute("SELECT COUNT(*) AS links, COUNT(DISTINCT model_path) AS linked_models, COUNT(DISTINCT texture_path) AS linked_textures FROM model_texture_links").fetchone())
-        fam=dict(self.db.execute("SELECT COUNT(*) AS families, COALESCE(SUM(member_count),0) AS family_members FROM model_families").fetchone())
-        status={r["status"]:r["count"] for r in self.db.execute("SELECT status, COUNT(*) AS count FROM model_texture_status GROUP BY status").fetchall()}
-        return row | fam | {"status_counts": status}
+        links = dict(self.db.execute("SELECT COUNT(*) links, COUNT(DISTINCT model_path) linked_models, COUNT(DISTINCT texture_path) linked_textures FROM model_texture_links").fetchone())
+        fam = dict(self.db.execute("SELECT COUNT(*) families, COALESCE(SUM(member_count),0) family_members FROM model_families").fetchone())
+        status = {r["status"]: r["count"] for r in self.db.execute("SELECT status, COUNT(*) count FROM model_texture_status GROUP BY status")}
+        return links | fam | {"status_counts": status}
+    def latest_scan(self):
+        return self.db.execute("SELECT * FROM scan_history ORDER BY id DESC LIMIT 1").fetchone()
+    def texture_stats(self):
+        return dict(self.db.execute("SELECT COUNT(*) total, COALESCE(SUM(size),0) total_size, COALESCE(AVG(size),0) avg_size, COUNT(DISTINCT sha256) unique_hashes, SUM(CASE WHEN is_dds=1 THEN 1 ELSE 0 END) dds_count FROM textures").fetchone())
+    def model_stats(self):
+        return dict(self.db.execute("SELECT COUNT(*) total, COALESCE(SUM(size),0) total_size, COALESCE(AVG(size),0) avg_size, COUNT(DISTINCT sha256) unique_hashes FROM models").fetchone())
+    def texture_format_counts(self):
+        return self.db.execute("SELECT COALESCE(NULLIF(dds_format,''), extension) format, COUNT(*) count FROM textures GROUP BY format ORDER BY count DESC").fetchall()
+    def folder_counts(self, limit=100):
+        return self.db.execute("SELECT folder, COUNT(*) count FROM models GROUP BY folder ORDER BY count DESC LIMIT ?", (limit,)).fetchall()
 
-    # Families
-    def clear_model_families(self): self.db.execute("DELETE FROM model_family_members"); self.db.execute("DELETE FROM model_families")
-    def family_candidate_groups(self, expression):
-        return self.db.execute(f"SELECT {expression} AS key_value, COUNT(*) AS count FROM models WHERE {expression}!='' GROUP BY key_value HAVING COUNT(*)>1 ORDER BY count DESC").fetchall()
-    def family_members_for_expression(self, expression, key_value):
-        return self.db.execute(f"SELECT * FROM models WHERE {expression}=? ORDER BY folder,filename", (key_value,)).fetchall()
-    def create_model_family(self, name, method, confidence, member_count):
-        self.db.execute("INSERT INTO model_families(name,method,confidence,member_count,created) VALUES(?,?,?,?,?)", (name,method,confidence,member_count,time.time()))
-    def last_insert_id(self): return int(self.db.execute("SELECT last_insert_rowid()").fetchone()[0])
-    def add_model_family_member(self, family_id, model_path, confidence):
-        self.db.execute("INSERT OR REPLACE INTO model_family_members(family_id,model_path,confidence) VALUES(?,?,?)", (family_id,model_path,confidence))
-    def model_families(self, limit=100):
-        return self.db.execute("SELECT * FROM model_families ORDER BY member_count DESC, confidence DESC LIMIT ?", (limit,)).fetchall()
-    def model_family_members(self, family_id, limit=500):
-        return self.db.execute("""SELECT fm.*, m.relative_path, m.filename, m.folder, m.size, m.sha256, m.filename_type, m.som_version
-            FROM model_family_members fm JOIN models m ON m.path=fm.model_path WHERE fm.family_id=? ORDER BY m.folder,m.filename LIMIT ?""", (family_id,limit)).fetchall()
+    # search/explore
+    def search_models(self, term: str, limit=100):
+        like = f"%{term}%"
+        return self.db.execute("SELECT * FROM models WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ? ORDER BY folder,filename LIMIT ?", (like,like,like,like,limit)).fetchall()
+    def search_textures(self, term: str, limit=100):
+        like = f"%{term}%"
+        return self.db.execute("SELECT * FROM textures WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ? OR dds_format LIKE ? ORDER BY folder,filename LIMIT ?", (like,like,like,like,like,limit)).fetchall()
+    def model_by_query(self, q: str):
+        return self.db.execute("SELECT * FROM models WHERE path=? OR relative_path=? OR filename=? ORDER BY relative_path LIMIT 1", (q,q,q)).fetchone()
+    def texture_by_query(self, q: str):
+        return self.db.execute("SELECT * FROM textures WHERE path=? OR relative_path=? OR filename=? ORDER BY relative_path LIMIT 1", (q,q,q)).fetchone()
+    def duplicates(self, table: str, limit=100):
+        return self.db.execute(f"SELECT sha256, COUNT(*) count, SUM(size) total_size FROM {table} WHERE sha256!='' GROUP BY sha256 HAVING COUNT(*)>1 ORDER BY count DESC,total_size DESC LIMIT ?", (limit,)).fetchall()
+    def rows_by_hash(self, table: str, sha: str):
+        return self.db.execute(f"SELECT * FROM {table} WHERE sha256=? ORDER BY folder,filename", (sha,)).fetchall()
+
+    # relationship
+    def clear_relationships(self):
+        self.db.execute("DELETE FROM model_texture_links")
+        self.db.execute("DELETE FROM model_texture_status")
+        self.commit()
+    def all_models(self):
+        return self.db.execute("SELECT * FROM models ORDER BY folder,filename").fetchall()
+    def textures_for_pid(self, folder: str, pid: str, limit=250):
+        return self.db.execute("SELECT * FROM textures WHERE folder=? AND filename LIKE ? ORDER BY filename LIMIT ?", (folder, f"{pid}_%", limit)).fetchall()
+    def textures_for_name(self, folder: str, base: str, limit=250):
+        return self.db.execute("SELECT * FROM textures WHERE folder=? AND (filename LIKE ? OR filename LIKE ? OR filename LIKE ?) ORDER BY filename LIMIT ?", (folder, f"{base}_%", f"{base}.%", f"%{base}%", limit)).fetchall()
+    def add_link(self, model_path, texture_path, score, method, reason):
+        self.db.execute("INSERT OR REPLACE INTO model_texture_links(model_path,texture_path,score,method,reason,created) VALUES(?,?,?,?,?,?)", (model_path,texture_path,score,method,reason,time.time()))
+    def set_model_texture_status(self, model_path, status, link_count, note):
+        self.db.execute("INSERT OR REPLACE INTO model_texture_status(model_path,status,link_count,note,updated) VALUES(?,?,?,?,?)", (model_path,status,link_count,note,time.time()))
+    def links_for_model(self, model_path: str, limit=100):
+        return self.db.execute("""SELECT l.*, t.relative_path texture_relative_path, t.dds_format, t.width, t.height, t.dds_width, t.dds_height
+            FROM model_texture_links l JOIN textures t ON t.path=l.texture_path WHERE model_path=? ORDER BY score DESC LIMIT ?""", (model_path, limit)).fetchall()
+    def links_for_texture(self, texture_path: str, limit=100):
+        return self.db.execute("""SELECT l.*, m.relative_path model_relative_path, m.folder
+            FROM model_texture_links l JOIN models m ON m.path=l.model_path WHERE texture_path=? ORDER BY score DESC LIMIT ?""", (texture_path, limit)).fetchall()
+
+    # family
+    def clear_families(self):
+        self.db.execute("DELETE FROM model_family_members")
+        self.db.execute("DELETE FROM model_families")
+        self.commit()
+    def create_family(self, name, method, confidence, members):
+        self.db.execute("INSERT INTO model_families(name,method,confidence,member_count,created) VALUES(?,?,?,?,?)", (name,method,confidence,len(members),time.time()))
+        fid = self.db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        for m in members:
+            self.db.execute("INSERT OR REPLACE INTO model_family_members(family_id,model_path,confidence) VALUES(?,?,?)", (fid,m["path"],confidence))
+    def family_groups(self, expr: str):
+        return self.db.execute(f"SELECT {expr} key_value, COUNT(*) count FROM models WHERE {expr}!='' GROUP BY key_value HAVING COUNT(*)>1 ORDER BY count DESC").fetchall()
+    def family_members_for(self, expr: str, key: str):
+        return self.db.execute(f"SELECT * FROM models WHERE {expr}=? ORDER BY folder,filename", (key,)).fetchall()
+    def families(self, limit=100):
+        return self.db.execute("SELECT * FROM model_families ORDER BY member_count DESC,confidence DESC LIMIT ?", (limit,)).fetchall()
+    def family_members(self, fid: int, limit=500):
+        return self.db.execute("""SELECT fm.*, m.* FROM model_family_members fm JOIN models m ON m.path=fm.model_path WHERE family_id=? ORDER BY m.folder,m.filename LIMIT ?""", (fid,limit)).fetchall()
