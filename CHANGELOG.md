@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.7.0
+
+- Added Research / Relationship Analysis menu.
+- Added model-to-texture candidate links.
+- Added model family clustering.
+- Added relationship statistics.
+- Added candidate texture links to Model Explorer.
+- Added candidate model links to texture views.
+
 ## v1.6.1
 
 - Added `.dds` to texture scanning.
@@ -7,12 +16,3 @@
 - Added DDS metadata fields to the texture database.
 - Added texture format summary.
 - Improved texture similarity scoring with DDS format data.
-
-## v1.6.0
-
-- Added Scan Manager.
-- Added full vs incremental model scans.
-- Added full vs incremental texture scans.
-- Added texture table and texture scanner.
-- Added optional pixel analysis through Pillow.
-- Added texture duplicate and similarity browsing.

@@ -23,9 +23,11 @@ def export_database_summary(filename: str = "database_summary.json") -> Path:
     REPORTS_PATH.mkdir(parents=True, exist_ok=True)
     db = Database()
     texture_stats = db.texture_stats()
+    rel = db.relationship_stats()
     data = {
         "models": db.count_models(),
         "textures": db.count_textures(),
+        "relationships": rel,
         "duplicate_model_hash_groups": db.duplicate_hash_count(),
         "texture_stats": texture_stats,
         "texture_formats": {row["format"]: row["count"] for row in db.texture_format_counts()},

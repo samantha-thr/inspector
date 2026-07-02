@@ -8,7 +8,19 @@ from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
 
-from config import APP_NAME, DEFAULT_SCAN_PATH, DUPLICATE_LIMIT, FOLDER_LIMIT, SEARCH_LIMIT, SIMILARITY_LIMIT, TEXTURE_LIMIT, VERSION
+from asset_analysis import rebuild_model_families, rebuild_model_texture_links
+from config import (
+    APP_NAME,
+    DEFAULT_SCAN_PATH,
+    DUPLICATE_LIMIT,
+    FAMILY_LIMIT,
+    FOLDER_LIMIT,
+    RELATIONSHIP_LIMIT,
+    SEARCH_LIMIT,
+    SIMILARITY_LIMIT,
+    TEXTURE_LIMIT,
+    VERSION,
+)
 from database import Database
 from reports import export_database_summary, export_search_results
 from scanner import scan_folder, scan_textures
@@ -47,43 +59,46 @@ def main_menu() -> None:
         show_database_quick_status()
         console.print(f"\n[bold]Default Resources:[/bold] {DEFAULT_SCAN_PATH}\n")
         console.print("[bold]1.[/bold] Scan Manager")
-        console.print("[bold]2.[/bold] Search Models")
-        console.print("[bold]3.[/bold] Model Explorer")
-        console.print("[bold]4.[/bold] Compare Models")
-        console.print("[bold]5.[/bold] Similar Models")
-        console.print("[bold]6.[/bold] Duplicate Browser")
-        console.print("[bold]7.[/bold] Folder Explorer")
-        console.print("[bold]8.[/bold] Compare Folders")
-        console.print("[bold]9.[/bold] Texture Browser")
-        console.print("[bold]10.[/bold] Statistics")
-        console.print("[bold]11.[/bold] Export Summary Report")
-        console.print("[bold]12.[/bold] Exit")
+        console.print("[bold]2.[/bold] Research / Relationship Analysis")
+        console.print("[bold]3.[/bold] Search Models")
+        console.print("[bold]4.[/bold] Model Explorer")
+        console.print("[bold]5.[/bold] Compare Models")
+        console.print("[bold]6.[/bold] Similar Models")
+        console.print("[bold]7.[/bold] Duplicate Browser")
+        console.print("[bold]8.[/bold] Folder Explorer")
+        console.print("[bold]9.[/bold] Compare Folders")
+        console.print("[bold]10.[/bold] Texture Browser")
+        console.print("[bold]11.[/bold] Statistics")
+        console.print("[bold]12.[/bold] Export Summary Report")
+        console.print("[bold]13.[/bold] Exit")
 
         choice = console.input("\nChoice: ").strip()
         if choice == "1": scan_manager()
-        elif choice == "2": search_database()
-        elif choice == "3": model_explorer()
-        elif choice == "4": compare_models_prompt()
-        elif choice == "5": similar_models_prompt()
-        elif choice == "6": duplicate_browser()
-        elif choice == "7": folder_explorer()
-        elif choice == "8": compare_folders_prompt()
-        elif choice == "9": texture_browser()
-        elif choice == "10": show_statistics()
-        elif choice == "11": export_summary()
-        elif choice == "12": return
+        elif choice == "2": research_menu()
+        elif choice == "3": search_database()
+        elif choice == "4": model_explorer()
+        elif choice == "5": compare_models_prompt()
+        elif choice == "6": similar_models_prompt()
+        elif choice == "7": duplicate_browser()
+        elif choice == "8": folder_explorer()
+        elif choice == "9": compare_folders_prompt()
+        elif choice == "10": texture_browser()
+        elif choice == "11": show_statistics()
+        elif choice == "12": export_summary()
+        elif choice == "13": return
 
 
 def show_database_quick_status() -> None:
     db = Database()
     total = db.count_models()
     textures = db.count_textures()
+    rel = db.relationship_stats()
     latest_model = db.latest_scan("model_incremental") or db.latest_scan("model_full")
     latest_texture = db.latest_scan("texture_incremental") or db.latest_scan("texture_full")
     db.close()
     model_text = "never" if not latest_model else time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest_model["finished"]))
     texture_text = "never" if not latest_texture else time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest_texture["finished"]))
-    console.print(f"[bold]Database:[/bold] {total:,} models | {textures:,} textures")
+    console.print(f"[bold]Database:[/bold] {total:,} models | {textures:,} textures | {rel.get('links',0):,} model-texture links | {rel.get('families',0):,} families")
     console.print(f"[bold]Last Model Scan:[/bold] {model_text} | [bold]Last Texture Scan:[/bold] {texture_text}")
 
 
@@ -159,6 +174,81 @@ def run_texture_scan(path: str, full_rescan: bool = False) -> None:
     pause()
 
 
+def research_menu() -> None:
+    while True:
+        console.clear()
+        header()
+        db = Database()
+        rel = db.relationship_stats()
+        db.close()
+        console.print("[bold cyan]Research / Relationship Analysis[/bold cyan]\n")
+        console.print(f"Current links: {rel.get('links',0):,} | Linked models: {rel.get('linked_models',0):,} | Linked textures: {rel.get('linked_textures',0):,}")
+        console.print(f"Families: {rel.get('families',0):,} | Family members: {rel.get('family_members',0):,}\n")
+        console.print("[bold]1.[/bold] Rebuild Model ↔ Texture Candidate Links")
+        console.print("[bold]2.[/bold] Rebuild Model Families")
+        console.print("[bold]3.[/bold] Browse Model Families")
+        console.print("[bold]4.[/bold] Back")
+        choice = console.input("\nChoice: ").strip()
+        if choice == "1": rebuild_links_screen()
+        elif choice == "2": rebuild_families_screen()
+        elif choice == "3": browse_families()
+        elif choice == "4": return
+
+
+def rebuild_links_screen() -> None:
+    console.clear(); header()
+    console.print("[yellow]This infers possible model-texture links using folder/name heuristics.[/yellow]")
+    console.print("It does not prove a texture is used by a model.\n")
+    confirm = console.input("Rebuild model-texture candidate links? (y/N): ").strip().lower()
+    if confirm != "y": return
+    console.print("\n[green]Building links...[/green]")
+    result = rebuild_model_texture_links()
+    table = Table(title="Model ↔ Texture Link Build Complete", header_style="bold cyan")
+    table.add_column("Metric"); table.add_column("Value", justify="right")
+    table.add_row("Folders checked", f"{result['folders']:,}")
+    table.add_row("Candidate pairs checked", f"{result['checked']:,}")
+    table.add_row("Links created", f"{result['links']:,}")
+    table.add_row("Elapsed", format_seconds(result["elapsed"]))
+    console.print(table); pause()
+
+
+def rebuild_families_screen() -> None:
+    console.clear(); header()
+    console.print("[yellow]This groups models using exact hashes and high-value binary fingerprints.[/yellow]\n")
+    confirm = console.input("Rebuild model families? (y/N): ").strip().lower()
+    if confirm != "y": return
+    console.print("\n[green]Building families...[/green]")
+    result = rebuild_model_families()
+    table = Table(title="Model Family Build Complete", header_style="bold cyan")
+    table.add_column("Metric"); table.add_column("Value", justify="right")
+    table.add_row("Families created", f"{result['families']:,}")
+    table.add_row("Members assigned", f"{result['members']:,}")
+    table.add_row("Elapsed", format_seconds(result["elapsed"]))
+    console.print(table); pause()
+
+
+def browse_families() -> None:
+    console.clear(); header()
+    db = Database(); rows = db.model_families(FAMILY_LIMIT); db.close()
+    table = Table(title="Model Families", header_style="bold cyan")
+    table.add_column("#", justify="right"); table.add_column("Name"); table.add_column("Method")
+    table.add_column("Confidence", justify="right"); table.add_column("Members", justify="right")
+    for i, row in enumerate(rows, 1):
+        table.add_row(str(i), row["name"], row["method"], str(row["confidence"]), f"{row['member_count']:,}")
+    console.print(table)
+    if rows:
+        choice = console.input("\nEnter family number to view members, or press Enter to return: ").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(rows):
+            show_family_members(rows[int(choice)-1]["id"])
+            pause()
+
+
+def show_family_members(family_id: int) -> None:
+    db = Database(); rows = db.model_family_members(family_id, 500); db.close()
+    console.clear(); header()
+    render_model_table(rows, f"Family Members ({len(rows)})")
+
+
 def show_scan_summary(summary: dict, label: str = "Models") -> None:
     table = Table(title=f"{summary.get('scan_mode', 'Scan')} Complete", show_header=True, header_style="bold cyan")
     table.add_column("Metric"); table.add_column("Value", justify="right")
@@ -216,8 +306,7 @@ def render_texture_table(rows, title: str) -> None:
     console.print(table)
 
 
-# --- Models ---
-
+# Models
 def search_database() -> None:
     console.clear(); header()
     term = console.input("Search filename, folder, path, or hash: ").strip()
@@ -253,6 +342,7 @@ def show_model_detail(path: str) -> None:
     duplicate_count = db.duplicate_count_for_hash(row["sha256"]) if row else 0
     duplicate_rows = db.models_by_hash(row["sha256"]) if row and duplicate_count > 1 else []
     candidates = db.model_comparison_candidates(path, 10) if row else []
+    texture_links = db.model_texture_links_for_model(path, RELATIONSHIP_LIMIT) if row else []
     db.close()
     console.clear(); header()
     if not row:
@@ -265,17 +355,27 @@ def show_model_detail(path: str) -> None:
         ("SOM Version", row["som_version"] or "Unknown"), ("Header", row["header"] or "Unknown"),
         ("String Count", f"{row['string_count']:,}"), ("Entropy", f"{row['entropy']:.4f}"),
         ("Printable Ratio", f"{row['printable_ratio']:.4f}"), ("Zero Ratio", f"{row['zero_ratio']:.4f}"),
-        ("Duplicate Copies", f"{duplicate_count:,}"), ("SHA256", row["sha256"]), ("MD5", row["md5"]),
-        ("CRC32", str(row["crc32"])), ("Prefix 4K Hash", row["prefix_4k_sha256"]),
-        ("Middle 4K Hash", row["middle_4k_sha256"]), ("Suffix 4K Hash", row["suffix_4k_sha256"]),
-        ("Full Path", row["path"]),
+        ("Candidate Texture Links", f"{len(texture_links):,}"), ("Duplicate Copies", f"{duplicate_count:,}"),
+        ("SHA256", row["sha256"]), ("MD5", row["md5"]), ("CRC32", str(row["crc32"])),
+        ("Prefix 4K Hash", row["prefix_4k_sha256"]), ("Middle 4K Hash", row["middle_4k_sha256"]),
+        ("Suffix 4K Hash", row["suffix_4k_sha256"]), ("Full Path", row["path"]),
     ]
     for k, v in fields: table.add_row(k, str(v))
     console.print(table)
     if row["first_64_hex"]: console.print(Panel(row["first_64_hex"], title="First 64 Bytes", border_style="blue"))
     if row["sample_strings"]: console.print(Panel(row["sample_strings"], title="Sample Strings", border_style="green"))
+    if texture_links: render_model_texture_links(texture_links, "Candidate Textures")
     if duplicate_rows: render_model_table(duplicate_rows, "Exact Hash Matches")
     if candidates: render_similarity_table(candidates, "Nearest Internal Matches")
+
+
+def render_model_texture_links(rows, title: str) -> None:
+    table = Table(title=title, header_style="bold cyan")
+    table.add_column("#", justify="right"); table.add_column("Score", justify="right")
+    table.add_column("Texture"); table.add_column("Format"); table.add_column("Reason")
+    for i, row in enumerate(rows, 1):
+        table.add_row(str(i), str(row["score"]), row["texture_relative_path"], row["dds_format"] or "-", row["reason"][:60])
+    console.print(table)
 
 
 def compare_models_prompt() -> None:
@@ -410,35 +510,36 @@ def compare_folders_prompt() -> None:
     console.print(table); pause()
 
 
-# --- Textures ---
-
+# Textures
 def texture_browser() -> None:
-    console.clear(); header()
-    console.print("[bold cyan]Texture Browser[/bold cyan]\n")
-    console.print("[bold]1.[/bold] Search Textures")
-    console.print("[bold]2.[/bold] Duplicate Texture Hashes")
-    console.print("[bold]3.[/bold] Similar Textures")
-    console.print("[bold]4.[/bold] Texture Format Summary")
-    console.print("[bold]5.[/bold] Back")
-    choice = console.input("\nChoice: ").strip()
-    if choice == "1": search_textures()
-    elif choice == "2": duplicate_textures()
-    elif choice == "3": similar_textures_prompt()
-    elif choice == "4": texture_format_summary()
+    while True:
+        console.clear(); header()
+        console.print("[bold cyan]Texture Browser[/bold cyan]\n")
+        console.print("[bold]1.[/bold] Search Textures")
+        console.print("[bold]2.[/bold] Duplicate Texture Hashes")
+        console.print("[bold]3.[/bold] Similar Textures")
+        console.print("[bold]4.[/bold] Texture Format Summary")
+        console.print("[bold]5.[/bold] Back")
+        choice = console.input("\nChoice: ").strip()
+        if choice == "1": search_textures()
+        elif choice == "2": duplicate_textures()
+        elif choice == "3": similar_textures_prompt()
+        elif choice == "4": texture_format_summary()
+        elif choice == "5": return
 
 
 def search_textures() -> None:
     console.clear(); header()
     term = console.input("Search texture filename, folder, path, hash, or DDS format: ").strip()
     if not term: return
-    db = Database(); rows = db.search_textures(term, TEXTURE_LIMIT); db.close()
+    db = Database(); rows = db.search_textures(term, RELATIONSHIP_LIMIT); db.close()
     render_texture_table(rows, f"Texture Search: {term}")
     pause()
 
 
 def duplicate_textures() -> None:
     console.clear(); header()
-    db = Database(); rows = db.duplicate_texture_hashes(TEXTURE_LIMIT); db.close()
+    db = Database(); rows = db.duplicate_texture_hashes(DUPLICATE_LIMIT); db.close()
     table = Table(title="Duplicate Texture Hash Groups", header_style="bold cyan")
     table.add_column("#", justify="right"); table.add_column("Copies", justify="right"); table.add_column("Total Size", justify="right"); table.add_column("SHA256")
     for i, row in enumerate(rows, 1):
@@ -461,6 +562,7 @@ def similar_textures_prompt() -> None:
     if not row:
         db.close(); console.print("[bold red]Texture not found.[/bold red]"); pause(); return
     rows = db.similar_textures(row["path"], TEXTURE_LIMIT)
+    model_links = db.texture_links_for_texture(row["path"], RELATIONSHIP_LIMIT)
     db.close()
     console.print(f"[bold]Base Texture:[/bold] {row['relative_path']}\n")
     table = Table(title="Similar Texture Candidates", header_style="bold cyan")
@@ -471,27 +573,30 @@ def similar_textures_prompt() -> None:
         avg = f"{tex['avg_r']:.0f},{tex['avg_g']:.0f},{tex['avg_b']:.0f}" if tex["ahash"] else "-"
         table.add_row(str(i), str(tex["score"]), tex["relative_path"], dims, tex["dds_format"] or tex["extension"], avg, tex["sha256"][:16] + "...")
     console.print(table)
+    if model_links:
+        model_table = Table(title="Candidate Linked Models", header_style="bold cyan")
+        model_table.add_column("#", justify="right"); model_table.add_column("Score", justify="right")
+        model_table.add_column("Model"); model_table.add_column("Reason")
+        for i, link in enumerate(model_links, 1):
+            model_table.add_row(str(i), str(link["score"]), link["model_relative_path"], link["reason"][:60])
+        console.print(model_table)
     pause()
 
 
 def texture_format_summary() -> None:
     console.clear(); header()
-    db = Database()
-    rows = db.texture_format_counts()
-    db.close()
+    db = Database(); rows = db.texture_format_counts(); db.close()
     table = Table(title="Texture Format Summary", header_style="bold cyan")
-    table.add_column("Format")
-    table.add_column("Count", justify="right")
-    for row in rows:
-        table.add_row(row["format"] or "Unknown", f"{row['count']:,}")
-    console.print(table)
-    pause()
+    table.add_column("Format"); table.add_column("Count", justify="right")
+    for row in rows: table.add_row(row["format"] or "Unknown", f"{row['count']:,}")
+    console.print(table); pause()
 
 
 def show_statistics() -> None:
     console.clear(); header()
     db = Database()
     total = db.count_models(); textures = db.count_textures(); texture_stats = db.texture_stats()
+    rel = db.relationship_stats()
     duplicate_groups = db.duplicate_hash_count(); type_counts = db.filename_type_counts()
     som_counts = db.som_version_counts(); folders = db.folder_counts(25)
     size_stats = db.size_stats(); latest = db.latest_scan()
@@ -501,6 +606,8 @@ def show_statistics() -> None:
     table.add_row("Models Indexed", f"{total:,}")
     table.add_row("Textures Indexed", f"{textures:,}")
     table.add_row("DDS Textures", f"{texture_stats.get('dds_count', 0):,}")
+    table.add_row("Model-Texture Links", f"{rel.get('links', 0):,}")
+    table.add_row("Model Families", f"{rel.get('families', 0):,}")
     table.add_row("Duplicate Model Hash Groups", f"{duplicate_groups:,}")
     table.add_row("Unique Texture Hashes", f"{texture_stats.get('unique_hashes', 0):,}")
     table.add_row("Total Model Data", format_bytes(size_stats["total_size"]))

@@ -160,6 +160,38 @@ class Database:
             self._add_column_if_missing("textures", column, definition)
 
         self.db.execute("""
+            CREATE TABLE IF NOT EXISTS model_texture_links(
+                model_path TEXT NOT NULL,
+                texture_path TEXT NOT NULL,
+                score INTEGER NOT NULL DEFAULT 0,
+                method TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                created REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY(model_path, texture_path)
+            )
+        """)
+
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS model_families(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL DEFAULT '',
+                method TEXT NOT NULL DEFAULT '',
+                confidence INTEGER NOT NULL DEFAULT 0,
+                member_count INTEGER NOT NULL DEFAULT 0,
+                created REAL NOT NULL DEFAULT 0
+            )
+        """)
+
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS model_family_members(
+                family_id INTEGER NOT NULL,
+                model_path TEXT NOT NULL,
+                confidence INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(family_id, model_path)
+            )
+        """)
+
+        self.db.execute("""
             CREATE TABLE IF NOT EXISTS scan_history(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 started REAL NOT NULL,
@@ -202,6 +234,11 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_textures_ahash ON textures(ahash)",
             "CREATE INDEX IF NOT EXISTS idx_textures_dds_format ON textures(dds_format)",
             "CREATE INDEX IF NOT EXISTS idx_textures_dds_fourcc ON textures(dds_fourcc)",
+            "CREATE INDEX IF NOT EXISTS idx_mtl_model ON model_texture_links(model_path)",
+            "CREATE INDEX IF NOT EXISTS idx_mtl_texture ON model_texture_links(texture_path)",
+            "CREATE INDEX IF NOT EXISTS idx_mtl_score ON model_texture_links(score)",
+            "CREATE INDEX IF NOT EXISTS idx_family_members_family ON model_family_members(family_id)",
+            "CREATE INDEX IF NOT EXISTS idx_family_members_model ON model_family_members(model_path)",
         ]:
             self.db.execute(stmt)
         self.db.commit()
@@ -495,6 +532,9 @@ class Database:
     def textures_by_hash(self, sha256: str):
         return self.db.execute("SELECT * FROM textures WHERE sha256 = ? ORDER BY folder, filename", (sha256,)).fetchall()
 
+    def textures_in_folder(self, folder: str, limit: int = 5000):
+        return self.db.execute("SELECT * FROM textures WHERE folder = ? ORDER BY filename LIMIT ?", (folder, limit)).fetchall()
+
     def similar_textures(self, path: str, limit: int = 100):
         tex = self.get_texture_by_path(path)
         if not tex:
@@ -522,6 +562,101 @@ class Database:
             tex["sha256"], tex["ahash"], tex["width"], tex["height"], tex["dds_format"],
             tex["avg_r"], tex["avg_g"], tex["avg_b"], limit,
         )).fetchall()
+
+    # Relationship / family methods
+    def clear_model_texture_links(self) -> None:
+        self.db.execute("DELETE FROM model_texture_links")
+
+    def upsert_model_texture_link(self, model_path: str, texture_path: str, score: int, reason: str, method: str) -> None:
+        self.db.execute("""
+            INSERT OR REPLACE INTO model_texture_links(model_path, texture_path, score, method, reason, created)
+            VALUES(?,?,?,?,?,?)
+        """, (model_path, texture_path, score, method, reason, time.time()))
+
+    def model_texture_links_for_model(self, model_path: str, limit: int = 100):
+        return self.db.execute("""
+            SELECT l.*, t.relative_path AS texture_relative_path, t.filename AS texture_filename,
+                   t.dds_format, t.width, t.height, t.dds_width, t.dds_height, t.sha256
+            FROM model_texture_links l
+            JOIN textures t ON t.path = l.texture_path
+            WHERE l.model_path = ?
+            ORDER BY l.score DESC, t.relative_path
+            LIMIT ?
+        """, (model_path, limit)).fetchall()
+
+    def texture_links_for_texture(self, texture_path: str, limit: int = 100):
+        return self.db.execute("""
+            SELECT l.*, m.relative_path AS model_relative_path, m.filename AS model_filename,
+                   m.folder, m.sha256
+            FROM model_texture_links l
+            JOIN models m ON m.path = l.model_path
+            WHERE l.texture_path = ?
+            ORDER BY l.score DESC, m.relative_path
+            LIMIT ?
+        """, (texture_path, limit)).fetchall()
+
+    def relationship_stats(self) -> dict[str, int]:
+        row = self.db.execute("""
+            SELECT COUNT(*) AS links,
+                   COUNT(DISTINCT model_path) AS linked_models,
+                   COUNT(DISTINCT texture_path) AS linked_textures
+            FROM model_texture_links
+        """).fetchone()
+        fam = self.db.execute("""
+            SELECT COUNT(*) AS families,
+                   COALESCE(SUM(member_count),0) AS family_members
+            FROM model_families
+        """).fetchone()
+        return dict(row) | dict(fam)
+
+    def clear_model_families(self) -> None:
+        self.db.execute("DELETE FROM model_family_members")
+        self.db.execute("DELETE FROM model_families")
+
+    def family_candidate_groups(self, expression: str):
+        return self.db.execute(f"""
+            SELECT {expression} AS key_value, COUNT(*) AS count
+            FROM models
+            WHERE {expression} != ''
+            GROUP BY key_value
+            HAVING COUNT(*) > 1
+            ORDER BY count DESC
+        """).fetchall()
+
+    def family_members_for_expression(self, expression: str, key_value: str):
+        return self.db.execute(f"""
+            SELECT * FROM models WHERE {expression} = ? ORDER BY folder, filename
+        """, (key_value,)).fetchall()
+
+    def create_model_family(self, name: str, method: str, confidence: int, member_count: int) -> None:
+        self.db.execute("""
+            INSERT INTO model_families(name, method, confidence, member_count, created)
+            VALUES(?,?,?,?,?)
+        """, (name, method, confidence, member_count, time.time()))
+
+    def last_insert_id(self) -> int:
+        return int(self.db.execute("SELECT last_insert_rowid()").fetchone()[0])
+
+    def add_model_family_member(self, family_id: int, model_path: str, confidence: int) -> None:
+        self.db.execute("""
+            INSERT OR REPLACE INTO model_family_members(family_id, model_path, confidence)
+            VALUES(?,?,?)
+        """, (family_id, model_path, confidence))
+
+    def model_families(self, limit: int = 100):
+        return self.db.execute("""
+            SELECT * FROM model_families ORDER BY member_count DESC, confidence DESC LIMIT ?
+        """, (limit,)).fetchall()
+
+    def model_family_members(self, family_id: int, limit: int = 500):
+        return self.db.execute("""
+            SELECT fm.*, m.relative_path, m.filename, m.folder, m.size, m.sha256, m.filename_type, m.som_version
+            FROM model_family_members fm
+            JOIN models m ON m.path = fm.model_path
+            WHERE fm.family_id = ?
+            ORDER BY m.folder, m.filename
+            LIMIT ?
+        """, (family_id, limit)).fetchall()
 
     def begin(self) -> None:
         self.db.execute("BEGIN")
