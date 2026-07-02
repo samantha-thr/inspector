@@ -1,4 +1,4 @@
-# There Inspector v1.2.0
+# There Inspector v1.2.3
 
 There Inspector is a local There.com `.model` scanner and SQLite indexer.
 
@@ -20,7 +20,11 @@ python -m pip install -r requirements.txt
 python there_inspector.py
 ```
 
-or use `there_inspector.bat`.
+or use:
+
+```bat
+there_inspector.bat
+```
 
 ## Default scan path
 
@@ -28,12 +32,13 @@ or use `there_inspector.bat`.
 C:\Makena\There\ThereClient\Resources
 ```
 
-## v1.2.0 changes
+## v1.2.3 changes
 
-- Default "Scan Client Resources" option
-- Better Rich progress display
-- SQLite batching for faster scans
-- Incremental scanning using file size and modified time
-- Filename classification
-- Search database
-- Statistics screen
+- Adds richer scan progress with hashed, skipped, error, and speed counters.
+- Adds basic SOM header inspection.
+- Adds SOM version counts to scan summaries and statistics.
+- Adds relative paths to the database.
+- Adds larger database statistics, including total size, average size, largest model, and smallest model.
+- Adds CSV export for search results.
+- Adds JSON summary export.
+- Keeps automatic database migration for older v1.0-v1.2 databases.
