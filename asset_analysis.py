@@ -10,15 +10,18 @@ from database import Database
 
 
 TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
-NUMERIC_PID_RE = re.compile(r"^(\d+)$")
 
 
 def clean_stem(filename: str) -> str:
     stem = Path(filename).stem.lower()
-    # There texture filenames often look like "12345_1.jpg.dds".
+
+    # There texture filenames often look like:
+    # 26962001_1.jpg.dds
+    # Path.stem removes only ".dds", so remove the embedded image extension too.
     for suffix in (".png", ".jpg", ".jpeg", ".bmp", ".tga", ".webp"):
         if stem.endswith(suffix):
             stem = stem[: -len(suffix)]
+
     return stem
 
 
@@ -41,7 +44,7 @@ def stem_tokens(name: str) -> set[str]:
 def score_official_model_texture(model, texture) -> tuple[int, str, str]:
     """Fallback scoring for named/official assets.
 
-    Official There models may have baked textures, but this still searches for
+    Official There models may have baked textures, but this still checks for
     external DDS candidates where names/folders line up.
     """
     score = 0
@@ -85,17 +88,20 @@ def score_official_model_texture(model, texture) -> tuple[int, str, str]:
 def rebuild_model_texture_links(progress_callback: Callable[[dict], None] | None = None) -> dict:
     """Build model→texture candidate links using There-aware rules.
 
-    Fast path:
-    - Numeric product ID model: PID.model → PID_1.jpg.dds / PID_2.jpg.dds etc.
+    v1.7.2 fix:
+    The previous version called db.begin() after DELETE statements had already
+    opened SQLite's implicit transaction. This caused:
+    sqlite3.OperationalError: cannot start a transaction within a transaction
 
-    Named/official path:
-    - Try exact/stem/token matches in the same folder.
-    - If none found, mark the model as likely baked/needs SOM parsing.
+    This version commits the table-clearing step before starting the batched
+    insert transaction.
     """
     db = Database()
     started = time.time()
+
     db.clear_model_texture_links()
     db.clear_model_texture_status()
+    db.commit()  # Important: close implicit transaction before db.begin().
 
     models = db.all_models_for_linking()
     total = len(models)
@@ -112,11 +118,14 @@ def rebuild_model_texture_links(progress_callback: Callable[[dict], None] | None
         model_links = 0
 
         if mb.isdigit():
+            # Fast There product convention:
+            # 26962001.model -> 26962001_1.jpg.dds, 26962001_2.jpg.dds, etc.
             textures = db.textures_for_base_prefix(mb, model["folder"], 250)
             checked_candidates += len(textures)
 
             for tex in textures:
                 tb, slot = texture_base_and_slot(tex["filename"])
+
                 if tb == mb:
                     score = 100
                     reason = f"numeric PID match; texture slot {slot or '?'}"
@@ -143,6 +152,7 @@ def rebuild_model_texture_links(progress_callback: Callable[[dict], None] | None
 
             for tex in textures:
                 score, reason, link_status = score_official_model_texture(model, tex)
+
                 if score >= TEXTURE_MIN_LINK_SCORE:
                     db.upsert_model_texture_link(
                         model_path=model["path"],
@@ -153,6 +163,7 @@ def rebuild_model_texture_links(progress_callback: Callable[[dict], None] | None
                     )
                     links += 1
                     model_links += 1
+
                     if link_status == "linked_external_dds":
                         status = link_status
                     elif status != "linked_external_dds":
@@ -167,6 +178,7 @@ def rebuild_model_texture_links(progress_callback: Callable[[dict], None] | None
             link_count=model_links,
             note="numeric PID external DDS" if mb.isdigit() else "named/official fallback; may be baked",
         )
+
         status_counts[status] = status_counts.get(status, 0) + 1
 
         if index % 1000 == 0:
@@ -199,7 +211,9 @@ def rebuild_model_texture_links(progress_callback: Callable[[dict], None] | None
 def rebuild_model_families(progress_callback: Callable[[dict], None] | None = None) -> dict:
     db = Database()
     started = time.time()
+
     db.clear_model_families()
+    db.commit()  # Same implicit-transaction safety as relationship rebuild.
 
     family_id = 1
     groups_created = 0
@@ -215,12 +229,15 @@ def rebuild_model_families(progress_callback: Callable[[dict], None] | None = No
     assigned_paths: set[str] = set()
     total_methods = len(grouping_methods)
 
+    db.begin()
+
     for method_index, (method, expression, confidence) in enumerate(grouping_methods, 1):
         rows = db.family_candidate_groups(expression)
 
-        for group_index, group in enumerate(rows, 1):
+        for group in rows:
             members = db.family_members_for_expression(expression, group["key_value"])
             members = [m for m in members if m["path"] not in assigned_paths]
+
             if len(members) < 2:
                 continue
 
@@ -238,6 +255,7 @@ def rebuild_model_families(progress_callback: Callable[[dict], None] | None = No
 
             if groups_created % 500 == 0:
                 db.commit()
+                db.begin()
 
         if progress_callback:
             elapsed = max(time.time() - started, 0.001)
