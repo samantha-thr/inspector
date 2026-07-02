@@ -1,2 +1,3 @@
-python -m pip install rich
+@echo off
+python -m pip install -r requirements.txt
 pause

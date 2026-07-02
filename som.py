@@ -1,1 +1,1 @@
-# SOM parser placeholder for v1
+# SOM parser will be expanded in a future version.
