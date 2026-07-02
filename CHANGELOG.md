@@ -1,18 +1,16 @@
 # Changelog
 
+## v1.7.1
+
+- Reworked model-texture relationship building.
+- Added fast PID-based texture linking.
+- Still checks official/named models for matching external DDS textures.
+- Marks likely baked-texture models when no DDS candidate exists.
+- Adds model texture relationship status table.
+
 ## v1.7.0
 
 - Added Research / Relationship Analysis menu.
 - Added model-to-texture candidate links.
 - Added model family clustering.
 - Added relationship statistics.
-- Added candidate texture links to Model Explorer.
-- Added candidate model links to texture views.
-
-## v1.6.1
-
-- Added `.dds` to texture scanning.
-- Added DDS header parser.
-- Added DDS metadata fields to the texture database.
-- Added texture format summary.
-- Improved texture similarity scoring with DDS format data.

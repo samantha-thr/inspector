@@ -3,123 +3,200 @@ from __future__ import annotations
 import re
 import time
 from pathlib import Path
-from typing import Iterable
+from typing import Callable
 
-from config import (
-    TEXTURE_MIN_LINK_SCORE,
-    TEXTURE_NEARBY_NAME_SCORE,
-    TEXTURE_NUMERIC_TOKEN_SCORE,
-    TEXTURE_SAME_FOLDER_SCORE,
-    TEXTURE_SHARED_TOKEN_SCORE,
-)
+from config import TEXTURE_MIN_LINK_SCORE
 from database import Database
 
 
 TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
+NUMERIC_PID_RE = re.compile(r"^(\d+)$")
 
 
-def stem_tokens(name: str) -> set[str]:
-    stem = Path(name).stem.lower()
-    # DDS files often look like "123_1.png.dds"; strip intermediate image extensions.
+def clean_stem(filename: str) -> str:
+    stem = Path(filename).stem.lower()
+    # There texture filenames often look like "12345_1.jpg.dds".
     for suffix in (".png", ".jpg", ".jpeg", ".bmp", ".tga", ".webp"):
         if stem.endswith(suffix):
             stem = stem[: -len(suffix)]
-    return {t for t in TOKEN_RE.findall(stem) if len(t) >= 2}
+    return stem
 
 
-def numeric_tokens(tokens: Iterable[str]) -> set[str]:
-    return {t for t in tokens if t.isdigit() and len(t) >= 4}
+def model_base(filename: str) -> str:
+    return Path(filename).stem.lower()
 
 
-def score_model_texture(model, texture) -> tuple[int, str]:
+def texture_base_and_slot(filename: str) -> tuple[str, str]:
+    stem = clean_stem(filename)
+    m = re.match(r"^(?P<base>.+?)_(?P<slot>\d+)$", stem)
+    if m:
+        return m.group("base"), m.group("slot")
+    return stem, ""
+
+
+def stem_tokens(name: str) -> set[str]:
+    return {t for t in TOKEN_RE.findall(clean_stem(name)) if len(t) >= 2}
+
+
+def score_official_model_texture(model, texture) -> tuple[int, str, str]:
+    """Fallback scoring for named/official assets.
+
+    Official There models may have baked textures, but this still searches for
+    external DDS candidates where names/folders line up.
+    """
     score = 0
     reasons: list[str] = []
 
-    model_tokens = stem_tokens(model["filename"])
-    texture_tokens = stem_tokens(texture["filename"])
-    shared = model_tokens & texture_tokens
-
-    model_nums = numeric_tokens(model_tokens)
-    texture_nums = numeric_tokens(texture_tokens)
-    shared_nums = model_nums & texture_nums
+    mb = model_base(model["filename"])
+    tb, slot = texture_base_and_slot(texture["filename"])
 
     if model["folder"] == texture["folder"]:
-        score += TEXTURE_SAME_FOLDER_SCORE
+        score += 20
         reasons.append("same folder")
 
-    if model["filename"].split(".")[0].lower() in texture["filename"].lower():
-        score += TEXTURE_NEARBY_NAME_SCORE
-        reasons.append("model stem inside texture name")
+    if tb == mb:
+        score += 75
+        reasons.append("exact base-name match")
+    elif tb.startswith(mb + "_") or tb.startswith(mb):
+        score += 60
+        reasons.append("texture base starts with model base")
+    elif mb in tb:
+        score += 45
+        reasons.append("model base inside texture base")
 
+    shared = stem_tokens(model["filename"]) & stem_tokens(texture["filename"])
     if shared:
-        token_score = min(len(shared) * TEXTURE_SHARED_TOKEN_SCORE, 45)
-        score += token_score
+        score += min(30, len(shared) * 10)
         reasons.append("shared tokens: " + ",".join(sorted(shared)[:5]))
 
-    if shared_nums:
-        score += TEXTURE_NUMERIC_TOKEN_SCORE
-        reasons.append("shared numeric id: " + ",".join(sorted(shared_nums)[:3]))
+    if slot:
+        reasons.append(f"texture slot {slot}")
 
-    if model["relative_path"].split("\\")[0:1] == texture["relative_path"].split("\\")[0:1]:
-        # Mild boost for same top-level resource group.
-        score += 5
-        reasons.append("same top-level resource group")
+    if score >= 85:
+        status = "linked_external_dds"
+    elif score >= TEXTURE_MIN_LINK_SCORE:
+        status = "possible_external_dds"
+    else:
+        status = "needs_som_parse"
 
-    return min(score, 100), "; ".join(reasons)
+    return min(score, 100), "; ".join(reasons), status
 
 
-def rebuild_model_texture_links(limit_textures_per_folder: int = 5000) -> dict:
-    """Infer model→texture links from folder/name proximity.
+def rebuild_model_texture_links(progress_callback: Callable[[dict], None] | None = None) -> dict:
+    """Build model→texture candidate links using There-aware rules.
 
-    This does not claim a texture is actually used by a model. It creates candidate
-    relationships for review until SOM texture references are decoded.
+    Fast path:
+    - Numeric product ID model: PID.model → PID_1.jpg.dds / PID_2.jpg.dds etc.
+
+    Named/official path:
+    - Try exact/stem/token matches in the same folder.
+    - If none found, mark the model as likely baked/needs SOM parsing.
     """
     db = Database()
     started = time.time()
     db.clear_model_texture_links()
+    db.clear_model_texture_status()
 
-    folders = [row["folder"] for row in db.folder_counts(100000)]
+    models = db.all_models_for_linking()
+    total = len(models)
+
     links = 0
-    checked = 0
+    status_counts: dict[str, int] = {}
+    checked_candidates = 0
 
-    for folder in folders:
-        models = db.models_in_folder(folder, 100000)
-        textures = db.textures_in_folder(folder, limit_textures_per_folder)
+    db.begin()
 
-        if not models or not textures:
-            continue
+    for index, model in enumerate(models, 1):
+        mb = model_base(model["filename"])
+        status = "needs_som_parse"
+        model_links = 0
 
-        for model in models:
-            candidates = []
-            for texture in textures:
-                checked += 1
-                score, reason = score_model_texture(model, texture)
-                if score >= TEXTURE_MIN_LINK_SCORE:
-                    candidates.append((score, texture, reason))
+        if mb.isdigit():
+            textures = db.textures_for_base_prefix(mb, model["folder"], 250)
+            checked_candidates += len(textures)
 
-            candidates.sort(key=lambda x: x[0], reverse=True)
-            for score, texture, reason in candidates[:25]:
+            for tex in textures:
+                tb, slot = texture_base_and_slot(tex["filename"])
+                if tb == mb:
+                    score = 100
+                    reason = f"numeric PID match; texture slot {slot or '?'}"
+                else:
+                    score = 70
+                    reason = "numeric PID fallback prefix match"
+
                 db.upsert_model_texture_link(
                     model_path=model["path"],
-                    texture_path=texture["path"],
+                    texture_path=tex["path"],
                     score=score,
                     reason=reason,
-                    method="folder_name_heuristic",
+                    method="numeric_pid",
                 )
                 links += 1
+                model_links += 1
+
+            status = "linked_external_dds" if model_links else "no_texture_found"
+
+        else:
+            # Official/named models may be baked, but still check for matching DDS.
+            textures = db.textures_for_named_model(mb, model["folder"], 250)
+            checked_candidates += len(textures)
+
+            for tex in textures:
+                score, reason, link_status = score_official_model_texture(model, tex)
+                if score >= TEXTURE_MIN_LINK_SCORE:
+                    db.upsert_model_texture_link(
+                        model_path=model["path"],
+                        texture_path=tex["path"],
+                        score=score,
+                        reason=reason,
+                        method="named_model_fallback",
+                    )
+                    links += 1
+                    model_links += 1
+                    if link_status == "linked_external_dds":
+                        status = link_status
+                    elif status != "linked_external_dds":
+                        status = link_status
+
+            if model_links == 0:
+                status = "likely_baked_texture"
+
+        db.upsert_model_texture_status(
+            model_path=model["path"],
+            status=status,
+            link_count=model_links,
+            note="numeric PID external DDS" if mb.isdigit() else "named/official fallback; may be baked",
+        )
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+        if index % 1000 == 0:
+            db.commit()
+            db.begin()
+
+        if progress_callback:
+            elapsed = max(time.time() - started, 0.001)
+            progress_callback({
+                "index": index,
+                "total": total,
+                "model": model["relative_path"],
+                "links": links,
+                "status": status,
+                "speed": index / elapsed,
+            })
 
     db.commit()
     db.close()
+
     return {
         "elapsed": time.time() - started,
-        "folders": len(folders),
+        "models": total,
         "links": links,
-        "checked": checked,
+        "checked": checked_candidates,
+        "status_counts": status_counts,
     }
 
 
-def rebuild_model_families() -> dict:
-    """Build simple model families from exact hash and high-value binary fingerprints."""
+def rebuild_model_families(progress_callback: Callable[[dict], None] | None = None) -> dict:
     db = Database()
     started = time.time()
     db.clear_model_families()
@@ -136,10 +213,12 @@ def rebuild_model_families() -> dict:
     ]
 
     assigned_paths: set[str] = set()
+    total_methods = len(grouping_methods)
 
-    for method, expression, confidence in grouping_methods:
+    for method_index, (method, expression, confidence) in enumerate(grouping_methods, 1):
         rows = db.family_candidate_groups(expression)
-        for group in rows:
+
+        for group_index, group in enumerate(rows, 1):
             members = db.family_members_for_expression(expression, group["key_value"])
             members = [m for m in members if m["path"] not in assigned_paths]
             if len(members) < 2:
@@ -156,6 +235,20 @@ def rebuild_model_families() -> dict:
 
             family_id += 1
             groups_created += 1
+
+            if groups_created % 500 == 0:
+                db.commit()
+
+        if progress_callback:
+            elapsed = max(time.time() - started, 0.001)
+            progress_callback({
+                "index": method_index,
+                "total": total_methods,
+                "method": method,
+                "families": groups_created,
+                "members": members_added,
+                "speed": groups_created / elapsed,
+            })
 
     db.commit()
     db.close()

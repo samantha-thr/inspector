@@ -1,24 +1,25 @@
-# There Inspector v1.7.0
+# There Inspector v1.7.1
 
-## v1.7.0 changes
+## v1.7.1 changes
 
-- Adds Research / Relationship Analysis menu.
-- Adds inferred model-to-texture candidate links.
-- Adds model family clustering based on exact hashes and high-value binary fingerprints.
-- Shows candidate texture links inside Model Explorer.
-- Shows candidate model links inside Similar Textures.
-- Adds relationship/family counts to status and statistics.
+- Replaces brute-force model-texture linking with There-aware naming rules.
+- Numeric product models now link directly to `PID_*.dds` textures.
+- Named/official models are still checked for matching external DDS textures.
+- Named/official models with no texture matches are marked as `likely_baked_texture`.
+- Adds model texture status values:
+  - `linked_external_dds`
+  - `possible_external_dds`
+  - `likely_baked_texture`
+  - `no_texture_found`
+  - `needs_som_parse`
+- Adds status counts to relationship stats.
 
-## Recommended workflow
+## Recommended after updating
 
-After updating:
+Run:
 
-1. Run **Scan Manager > Full Model Rescan** if v1.5 fingerprints are not populated.
-2. Run **Scan Manager > Full Texture Rescan** if DDS metadata is not populated.
-3. Run **Research / Relationship Analysis > Rebuild Model ↔ Texture Candidate Links**.
-4. Run **Research / Relationship Analysis > Rebuild Model Families**.
+```text
+Research / Relationship Analysis > Rebuild Model ↔ Texture Candidate Links
+```
 
-## Important
-
-Model ↔ texture links are currently heuristic candidates only. They use folder/name
-proximity until SOM texture references are decoded.
+This version should be dramatically faster than v1.7.0.
