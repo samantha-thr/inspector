@@ -101,6 +101,20 @@ class Database:
                 avg_a REAL NOT NULL DEFAULT 255,
                 ahash TEXT NOT NULL DEFAULT '',
                 analysis_status TEXT NOT NULL DEFAULT '',
+                is_dds INTEGER NOT NULL DEFAULT 0,
+                dds_width INTEGER NOT NULL DEFAULT 0,
+                dds_height INTEGER NOT NULL DEFAULT 0,
+                dds_mipmaps INTEGER NOT NULL DEFAULT 0,
+                dds_fourcc TEXT NOT NULL DEFAULT '',
+                dds_format TEXT NOT NULL DEFAULT '',
+                dds_rgb_bits INTEGER NOT NULL DEFAULT 0,
+                dds_has_alpha INTEGER NOT NULL DEFAULT 0,
+                dds_is_cubemap INTEGER NOT NULL DEFAULT 0,
+                dds_is_volume INTEGER NOT NULL DEFAULT 0,
+                dds_header_flags TEXT NOT NULL DEFAULT '',
+                dds_caps2 TEXT NOT NULL DEFAULT '',
+                dds_estimated_vram INTEGER NOT NULL DEFAULT 0,
+                dds_header_status TEXT NOT NULL DEFAULT '',
                 last_scanned REAL NOT NULL DEFAULT 0
             )
         """)
@@ -126,6 +140,20 @@ class Database:
             "avg_a": "REAL NOT NULL DEFAULT 255",
             "ahash": "TEXT NOT NULL DEFAULT ''",
             "analysis_status": "TEXT NOT NULL DEFAULT ''",
+            "is_dds": "INTEGER NOT NULL DEFAULT 0",
+            "dds_width": "INTEGER NOT NULL DEFAULT 0",
+            "dds_height": "INTEGER NOT NULL DEFAULT 0",
+            "dds_mipmaps": "INTEGER NOT NULL DEFAULT 0",
+            "dds_fourcc": "TEXT NOT NULL DEFAULT ''",
+            "dds_format": "TEXT NOT NULL DEFAULT ''",
+            "dds_rgb_bits": "INTEGER NOT NULL DEFAULT 0",
+            "dds_has_alpha": "INTEGER NOT NULL DEFAULT 0",
+            "dds_is_cubemap": "INTEGER NOT NULL DEFAULT 0",
+            "dds_is_volume": "INTEGER NOT NULL DEFAULT 0",
+            "dds_header_flags": "TEXT NOT NULL DEFAULT ''",
+            "dds_caps2": "TEXT NOT NULL DEFAULT ''",
+            "dds_estimated_vram": "INTEGER NOT NULL DEFAULT 0",
+            "dds_header_status": "TEXT NOT NULL DEFAULT ''",
             "last_scanned": "REAL NOT NULL DEFAULT 0",
         }
         for column, definition in texture_migrations.items():
@@ -150,41 +178,35 @@ class Database:
         if "scan_type" not in self._columns("scan_history"):
             self.db.execute("ALTER TABLE scan_history ADD COLUMN scan_type TEXT NOT NULL DEFAULT 'model'")
 
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS settings(
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-        """)
+        self.db.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
 
-        # Model indexes
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_sha256 ON models(sha256)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_md5 ON models(md5)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_crc32 ON models(crc32)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_size ON models(size)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_folder ON models(folder)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_filename ON models(filename)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_filename_type ON models(filename_type)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_som_version ON models(som_version)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_relative_path ON models(relative_path)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_first256 ON models(first_256_sha256)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_prefix4k ON models(prefix_4k_sha256)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_suffix4k ON models(suffix_4k_sha256)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_models_middle4k ON models(middle_4k_sha256)")
-
-        # Texture indexes
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_sha256 ON textures(sha256)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_size ON textures(size)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_folder ON textures(folder)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_filename ON textures(filename)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_dimensions ON textures(width, height)")
-        self.db.execute("CREATE INDEX IF NOT EXISTS idx_textures_ahash ON textures(ahash)")
-
+        for stmt in [
+            "CREATE INDEX IF NOT EXISTS idx_models_sha256 ON models(sha256)",
+            "CREATE INDEX IF NOT EXISTS idx_models_md5 ON models(md5)",
+            "CREATE INDEX IF NOT EXISTS idx_models_crc32 ON models(crc32)",
+            "CREATE INDEX IF NOT EXISTS idx_models_size ON models(size)",
+            "CREATE INDEX IF NOT EXISTS idx_models_folder ON models(folder)",
+            "CREATE INDEX IF NOT EXISTS idx_models_filename ON models(filename)",
+            "CREATE INDEX IF NOT EXISTS idx_models_filename_type ON models(filename_type)",
+            "CREATE INDEX IF NOT EXISTS idx_models_som_version ON models(som_version)",
+            "CREATE INDEX IF NOT EXISTS idx_models_relative_path ON models(relative_path)",
+            "CREATE INDEX IF NOT EXISTS idx_models_first256 ON models(first_256_sha256)",
+            "CREATE INDEX IF NOT EXISTS idx_models_prefix4k ON models(prefix_4k_sha256)",
+            "CREATE INDEX IF NOT EXISTS idx_models_suffix4k ON models(suffix_4k_sha256)",
+            "CREATE INDEX IF NOT EXISTS idx_models_middle4k ON models(middle_4k_sha256)",
+            "CREATE INDEX IF NOT EXISTS idx_textures_sha256 ON textures(sha256)",
+            "CREATE INDEX IF NOT EXISTS idx_textures_size ON textures(size)",
+            "CREATE INDEX IF NOT EXISTS idx_textures_folder ON textures(folder)",
+            "CREATE INDEX IF NOT EXISTS idx_textures_filename ON textures(filename)",
+            "CREATE INDEX IF NOT EXISTS idx_textures_dimensions ON textures(width, height)",
+            "CREATE INDEX IF NOT EXISTS idx_textures_ahash ON textures(ahash)",
+            "CREATE INDEX IF NOT EXISTS idx_textures_dds_format ON textures(dds_format)",
+            "CREATE INDEX IF NOT EXISTS idx_textures_dds_fourcc ON textures(dds_fourcc)",
+        ]:
+            self.db.execute(stmt)
         self.db.commit()
 
-    # -------------------------
     # Model methods
-    # -------------------------
     def get_existing_map(self) -> dict[str, sqlite3.Row]:
         rows = self.db.execute("SELECT path, size, mtime FROM models").fetchall()
         return {row["path"]: row for row in rows}
@@ -206,16 +228,7 @@ class Database:
             )
         """, row)
 
-    def add_scan_history(
-        self,
-        root: str,
-        started: float,
-        found: int,
-        scanned: int,
-        skipped: int,
-        errors: int,
-        scan_type: str = "model",
-    ) -> None:
+    def add_scan_history(self, root: str, started: float, found: int, scanned: int, skipped: int, errors: int, scan_type: str = "model") -> None:
         finished = time.time()
         self.db.execute("""
             INSERT INTO scan_history(started, finished, root, found, scanned, skipped, errors, elapsed, scan_type)
@@ -252,25 +265,18 @@ class Database:
         """, (sha256,)).fetchall()
 
     def filename_type_counts(self) -> dict[str, int]:
-        rows = self.db.execute("""
-            SELECT filename_type, COUNT(*) AS count FROM models
-            GROUP BY filename_type ORDER BY count DESC
-        """).fetchall()
+        rows = self.db.execute("SELECT filename_type, COUNT(*) AS count FROM models GROUP BY filename_type ORDER BY count DESC").fetchall()
         return {row["filename_type"]: row["count"] for row in rows}
 
     def som_version_counts(self) -> dict[str, int]:
         rows = self.db.execute("""
-            SELECT CASE WHEN som_version = '' THEN 'Unknown' ELSE som_version END AS version,
-                   COUNT(*) AS count
+            SELECT CASE WHEN som_version = '' THEN 'Unknown' ELSE som_version END AS version, COUNT(*) AS count
             FROM models GROUP BY version ORDER BY count DESC
         """).fetchall()
         return {row["version"]: row["count"] for row in rows}
 
     def folder_counts(self, limit: int = 25):
-        return self.db.execute("""
-            SELECT folder, COUNT(*) AS count FROM models
-            GROUP BY folder ORDER BY count DESC LIMIT ?
-        """, (limit,)).fetchall()
+        return self.db.execute("SELECT folder, COUNT(*) AS count FROM models GROUP BY folder ORDER BY count DESC LIMIT ?", (limit,)).fetchall()
 
     def folder_details(self, folder: str):
         return self.db.execute("""
@@ -308,10 +314,7 @@ class Database:
 
     def latest_scan(self, scan_type: str | None = None):
         if scan_type:
-            return self.db.execute(
-                "SELECT * FROM scan_history WHERE scan_type = ? ORDER BY id DESC LIMIT 1",
-                (scan_type,),
-            ).fetchone()
+            return self.db.execute("SELECT * FROM scan_history WHERE scan_type = ? ORDER BY id DESC LIMIT 1", (scan_type,)).fetchone()
         return self.db.execute("SELECT * FROM scan_history ORDER BY id DESC LIMIT 1").fetchone()
 
     def search(self, term: str, limit: int = 100):
@@ -328,8 +331,7 @@ class Database:
 
     def get_model_by_relative_or_filename(self, query: str):
         return self.db.execute("""
-            SELECT * FROM models
-            WHERE relative_path = ? OR filename = ? OR path = ?
+            SELECT * FROM models WHERE relative_path = ? OR filename = ? OR path = ?
             ORDER BY relative_path LIMIT 1
         """, (query, query, query)).fetchone()
 
@@ -358,29 +360,19 @@ class Database:
               + CASE WHEN ABS(entropy - ?) < 0.05 THEN 4 ELSE 0 END
               + CASE WHEN ABS(printable_ratio - ?) < 0.01 THEN 3 ELSE 0 END
               + CASE WHEN ABS(zero_ratio - ?) < 0.01 THEN 3 ELSE 0 END
-              + CASE WHEN som_version = ? AND som_version != '' THEN 3 ELSE 0 END
-                AS score
+              + CASE WHEN som_version = ? AND som_version != '' THEN 3 ELSE 0 END AS score
             FROM models
-            WHERE path != ?
-              AND (
-                    sha256 = ?
-                 OR prefix_4k_sha256 = ?
-                 OR suffix_4k_sha256 = ?
-                 OR middle_4k_sha256 = ?
-                 OR first_256_sha256 = ?
-                 OR size = ?
-                 OR folder = ?
-              )
-            ORDER BY score DESC, size DESC, folder, filename
-            LIMIT ?
+            WHERE path != ? AND (
+                sha256 = ? OR prefix_4k_sha256 = ? OR suffix_4k_sha256 = ? OR middle_4k_sha256 = ?
+                OR first_256_sha256 = ? OR size = ? OR folder = ?
+            )
+            ORDER BY score DESC, size DESC, folder, filename LIMIT ?
         """, (
-            model["sha256"], model["prefix_4k_sha256"], model["suffix_4k_sha256"],
-            model["middle_4k_sha256"], model["first_256_sha256"], model["size"],
-            model["folder"], model["filename_type"], model["entropy"],
-            model["printable_ratio"], model["zero_ratio"], model["som_version"],
-            model["path"], model["sha256"], model["prefix_4k_sha256"],
-            model["suffix_4k_sha256"], model["middle_4k_sha256"],
-            model["first_256_sha256"], model["size"], model["folder"], limit
+            model["sha256"], model["prefix_4k_sha256"], model["suffix_4k_sha256"], model["middle_4k_sha256"],
+            model["first_256_sha256"], model["size"], model["folder"], model["filename_type"], model["entropy"],
+            model["printable_ratio"], model["zero_ratio"], model["som_version"], model["path"], model["sha256"],
+            model["prefix_4k_sha256"], model["suffix_4k_sha256"], model["middle_4k_sha256"], model["first_256_sha256"],
+            model["size"], model["folder"], limit,
         )).fetchall()
 
     def compare_two_models(self, path_a: str, path_b: str) -> dict[str, Any]:
@@ -430,9 +422,7 @@ class Database:
         """, (folder_a, folder_b)).fetchone()["count"]
         return {"a": a, "b": b, "shared_hashes": overlap}
 
-    # -------------------------
     # Texture methods
-    # -------------------------
     def get_existing_texture_map(self) -> dict[str, sqlite3.Row]:
         rows = self.db.execute("SELECT path, size, mtime FROM textures").fetchall()
         return {row["path"]: row for row in rows}
@@ -442,11 +432,19 @@ class Database:
             INSERT OR REPLACE INTO textures(
                 path, root, relative_path, filename, folder, extension, size, mtime,
                 sha256, md5, crc32, width, height, mode, has_alpha,
-                avg_r, avg_g, avg_b, avg_a, ahash, analysis_status, last_scanned
+                avg_r, avg_g, avg_b, avg_a, ahash, analysis_status,
+                is_dds, dds_width, dds_height, dds_mipmaps, dds_fourcc, dds_format,
+                dds_rgb_bits, dds_has_alpha, dds_is_cubemap, dds_is_volume,
+                dds_header_flags, dds_caps2, dds_estimated_vram, dds_header_status,
+                last_scanned
             ) VALUES(
                 :path, :root, :relative_path, :filename, :folder, :extension, :size, :mtime,
                 :sha256, :md5, :crc32, :width, :height, :mode, :has_alpha,
-                :avg_r, :avg_g, :avg_b, :avg_a, :ahash, :analysis_status, :last_scanned
+                :avg_r, :avg_g, :avg_b, :avg_a, :ahash, :analysis_status,
+                :is_dds, :dds_width, :dds_height, :dds_mipmaps, :dds_fourcc, :dds_format,
+                :dds_rgb_bits, :dds_has_alpha, :dds_is_cubemap, :dds_is_volume,
+                :dds_header_flags, :dds_caps2, :dds_estimated_vram, :dds_header_status,
+                :last_scanned
             )
         """, row)
 
@@ -455,29 +453,34 @@ class Database:
 
     def texture_stats(self) -> dict[str, Any]:
         row = self.db.execute("""
-            SELECT COUNT(*) AS total,
-                COALESCE(SUM(size), 0) AS total_size,
-                COALESCE(AVG(size), 0) AS avg_size,
-                COUNT(DISTINCT sha256) AS unique_hashes
+            SELECT COUNT(*) AS total, COALESCE(SUM(size), 0) AS total_size,
+                COALESCE(AVG(size), 0) AS avg_size, COUNT(DISTINCT sha256) AS unique_hashes,
+                SUM(CASE WHEN is_dds = 1 THEN 1 ELSE 0 END) AS dds_count
             FROM textures
         """).fetchone()
         return dict(row)
+
+    def texture_format_counts(self):
+        return self.db.execute("""
+            SELECT CASE WHEN dds_format = '' THEN extension ELSE dds_format END AS format, COUNT(*) AS count
+            FROM textures GROUP BY format ORDER BY count DESC
+        """).fetchall()
 
     def search_textures(self, term: str, limit: int = 100):
         like = f"%{term}%"
         return self.db.execute("""
             SELECT * FROM textures
-            WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR path LIKE ? OR sha256 LIKE ?
+            WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR path LIKE ?
+               OR sha256 LIKE ? OR dds_format LIKE ? OR dds_fourcc LIKE ?
             ORDER BY folder, filename LIMIT ?
-        """, (like, like, like, like, like, limit)).fetchall()
+        """, (like, like, like, like, like, like, like, limit)).fetchall()
 
     def get_texture_by_path(self, path: str):
         return self.db.execute("SELECT * FROM textures WHERE path = ?", (path,)).fetchone()
 
     def get_texture_by_relative_or_filename(self, query: str):
         return self.db.execute("""
-            SELECT * FROM textures
-            WHERE relative_path = ? OR filename = ? OR path = ?
+            SELECT * FROM textures WHERE relative_path = ? OR filename = ? OR path = ?
             ORDER BY relative_path LIMIT 1
         """, (query, query, query)).fetchone()
 
@@ -490,9 +493,7 @@ class Database:
         """, (limit,)).fetchall()
 
     def textures_by_hash(self, sha256: str):
-        return self.db.execute("""
-            SELECT * FROM textures WHERE sha256 = ? ORDER BY folder, filename
-        """, (sha256,)).fetchall()
+        return self.db.execute("SELECT * FROM textures WHERE sha256 = ? ORDER BY folder, filename", (sha256,)).fetchall()
 
     def similar_textures(self, path: str, limit: int = 100):
         tex = self.get_texture_by_path(path)
@@ -504,27 +505,22 @@ class Database:
               + CASE WHEN ahash = ? AND ahash != '' THEN 45 ELSE 0 END
               + CASE WHEN width = ? AND width != 0 THEN 10 ELSE 0 END
               + CASE WHEN height = ? AND height != 0 THEN 10 ELSE 0 END
+              + CASE WHEN dds_format = ? AND dds_format != '' THEN 10 ELSE 0 END
+              + CASE WHEN dds_mipmaps = ? AND dds_mipmaps != 0 THEN 5 ELSE 0 END
               + CASE WHEN has_alpha = ? THEN 5 ELSE 0 END
               + CASE WHEN ABS(avg_r - ?) < 8 AND ABS(avg_g - ?) < 8 AND ABS(avg_b - ?) < 8 THEN 20 ELSE 0 END
-              + CASE WHEN ABS(size - ?) < 128 THEN 5 ELSE 0 END
-                AS score
+              + CASE WHEN ABS(size - ?) < 128 THEN 5 ELSE 0 END AS score
             FROM textures
-            WHERE path != ?
-              AND (
-                    sha256 = ?
-                 OR ahash = ?
-                 OR (width = ? AND height = ?)
-                 OR ABS(avg_r - ?) < 20
-                 OR ABS(avg_g - ?) < 20
-                 OR ABS(avg_b - ?) < 20
-              )
-            ORDER BY score DESC, folder, filename
-            LIMIT ?
+            WHERE path != ? AND (
+                sha256 = ? OR ahash = ? OR (width = ? AND height = ?)
+                OR dds_format = ? OR ABS(avg_r - ?) < 20 OR ABS(avg_g - ?) < 20 OR ABS(avg_b - ?) < 20
+            )
+            ORDER BY score DESC, folder, filename LIMIT ?
         """, (
-            tex["sha256"], tex["ahash"], tex["width"], tex["height"], tex["has_alpha"],
-            tex["avg_r"], tex["avg_g"], tex["avg_b"], tex["size"], tex["path"],
-            tex["sha256"], tex["ahash"], tex["width"], tex["height"],
-            tex["avg_r"], tex["avg_g"], tex["avg_b"], limit
+            tex["sha256"], tex["ahash"], tex["width"], tex["height"], tex["dds_format"], tex["dds_mipmaps"],
+            tex["has_alpha"], tex["avg_r"], tex["avg_g"], tex["avg_b"], tex["size"], tex["path"],
+            tex["sha256"], tex["ahash"], tex["width"], tex["height"], tex["dds_format"],
+            tex["avg_r"], tex["avg_g"], tex["avg_b"], limit,
         )).fetchall()
 
     def begin(self) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 APP_NAME = "There Inspector"
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 
 DEFAULT_SCAN_PATH = r"C:\Makena\There\ThereClient\Resources"
 DATABASE_PATH = Path("database") / "inspector.db"
@@ -11,7 +11,10 @@ REPORTS_PATH = Path("reports")
 LOGS_PATH = Path("logs")
 
 MODEL_EXTENSION = ".model"
-TEXTURE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tga", ".webp")
+
+# DDS is the primary There client texture format. Other formats are included
+# for personal project folders and future converted/exported assets.
+TEXTURE_EXTENSIONS = (".dds", ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".webp")
 
 HASH_CHUNK_SIZE = 1024 * 1024
 BATCH_SIZE = 1000

@@ -1,2 +1,2 @@
 rich
-Pillow
+Pillow>=11.0

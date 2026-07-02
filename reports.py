@@ -28,6 +28,7 @@ def export_database_summary(filename: str = "database_summary.json") -> Path:
         "textures": db.count_textures(),
         "duplicate_model_hash_groups": db.duplicate_hash_count(),
         "texture_stats": texture_stats,
+        "texture_formats": {row["format"]: row["count"] for row in db.texture_format_counts()},
         "filename_types": db.filename_type_counts(),
         "som_versions": db.som_version_counts(),
         "size_stats": {k: v for k, v in db.size_stats().items() if k not in ("largest", "smallest")},

@@ -1,28 +1,21 @@
-# There Inspector v1.6.0
+# There Inspector v1.6.1
 
-## v1.6.0 changes
+## v1.6.1 changes
 
-- Adds Scan Manager.
-- Adds separate Incremental Model Scan and Full Model Rescan.
-- Adds separate Incremental Texture Scan and Full Texture Rescan.
-- Adds texture database table.
-- Adds texture hashing and optional pixel analysis using Pillow.
-- Adds texture duplicate browser.
-- Adds similar texture search using dimensions, average color, alpha, and perceptual-style average hash.
-- Updates statistics to include texture totals.
+- Adds `.dds` as the primary texture scan extension.
+- Adds DDS header parsing.
+- Stores DDS width, height, mipmaps, FourCC, format, alpha, cubemap/volume flags, and estimated VRAM.
+- Adds DDS format searching and format summaries.
+- Improves texture similarity scoring using DDS format and mipmap information.
+- Keeps Pillow pixel analysis when Pillow can decode the texture.
+- Falls back to DDS header-only analysis when Pillow cannot decode a compressed DDS.
 
-## Install
+## Recommended after updating
 
-```bat
-install.bat
+Run:
+
+```text
+Scan Manager > Full Texture Rescan
 ```
 
-This installs:
-
-- rich
-- Pillow
-
-## Important
-
-Run **Scan Manager > Full Model Rescan** once after v1.5 if you need all model fingerprint columns rebuilt.
-Run **Scan Manager > Full Texture Rescan** once to populate the texture database.
+This populates the new DDS metadata columns.

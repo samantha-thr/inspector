@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.6.1
+
+- Added `.dds` to texture scanning.
+- Added DDS header parser.
+- Added DDS metadata fields to the texture database.
+- Added texture format summary.
+- Improved texture similarity scoring with DDS format data.
+
 ## v1.6.0
 
 - Added Scan Manager.
@@ -8,12 +16,3 @@
 - Added texture table and texture scanner.
 - Added optional pixel analysis through Pillow.
 - Added texture duplicate and similarity browsing.
-
-## v1.5.0
-
-- Added comprehensive binary fingerprints.
-- Added prefix/middle/suffix block hashes.
-- Added entropy and byte-ratio metrics.
-- Added full-file string count and sample strings.
-- Improved model similarity scoring.
-- Expanded model/folder details.
