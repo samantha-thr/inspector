@@ -1,37 +1,39 @@
-# There Inspector v2.0.0
+# There Inspector v2.1.0
 
-v2 is a clean rebuild of the scanner, database, relationship engine, and UI.
+v2.1 adds the first real Evidence Engine for finding possible reused, recolored, re-exported, or improperly credited assets.
 
-## Why v2?
+## New in v2.1
 
-The v1.x branch proved the ideas, but the database and UI drifted as features were added.
-v2 starts fresh with a stable schema and consistent analysis pipeline.
+- Texture intelligence:
+  - alpha coverage
+  - edge density
+  - brightness
+  - saturation
+  - grayscale detection
+  - probable normal-map detection
+  - color histogram fingerprint
 
-## Install
+- Texture families:
+  - exact SHA256
+  - perceptual average hash
+  - color histogram family
 
-```bat
-install.bat
-```
+- Evidence pairs:
+  - binary score
+  - texture score
+  - string score
+  - overall evidence score
+  - evidence reason text
 
-## Run
+- Evidence CSV export:
+  - reports/evidence_pairs.csv
 
-```bat
-python there_inspector.py
-```
+## Recommended after updating from v2.0
 
-## Recommended first run
+1. Scan Manager > Full Texture Rescan
+2. Research / Analysis > Rebuild Model ↔ Texture Links
+3. Research / Analysis > Rebuild Model Families
+4. Research / Analysis > Rebuild Texture Families
+5. Research / Analysis > Rebuild Evidence Pairs
 
-1. Scan Manager > Full Model Rescan
-2. Scan Manager > Full Texture Rescan
-3. Research / Analysis > Rebuild Model ↔ Texture Links
-4. Research / Analysis > Rebuild Model Families
-
-## Important
-
-v2 uses a new database file:
-
-```text
-database/inspector_v2.db
-```
-
-Your v1 database is not modified.
+Evidence scores are investigative leads only. They are not ownership or infringement conclusions.

@@ -1,11 +1,8 @@
 from __future__ import annotations
-
 import hashlib
 import zlib
 from pathlib import Path
-
 from config import HASH_CHUNK_SIZE
-
 
 def file_hashes(path: Path) -> tuple[str, str, int]:
     sha = hashlib.sha256()
@@ -18,13 +15,11 @@ def file_hashes(path: Path) -> tuple[str, str, int]:
             crc = zlib.crc32(chunk, crc)
     return sha.hexdigest(), md5.hexdigest(), crc & 0xFFFFFFFF
 
-
 def safe_relative_path(path: Path, root: Path) -> str:
     try:
         return str(path.relative_to(root))
     except ValueError:
         return str(path)
-
 
 def format_bytes(value: int | float) -> str:
     value = float(value or 0)
@@ -34,9 +29,8 @@ def format_bytes(value: int | float) -> str:
         value /= 1024
     return f"{value:.1f} GB"
 
-
 def format_seconds(seconds: float) -> str:
-    seconds = int(seconds)
+    seconds = int(seconds or 0)
     h, rem = divmod(seconds, 3600)
     m, s = divmod(rem, 60)
     return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
