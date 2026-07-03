@@ -4,7 +4,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
-from analysis_engine import rebuild_evidence, rebuild_families, rebuild_links, rebuild_texture_families
+from analysis_engine import rebuild_evidence, rebuild_families, rebuild_links, rebuild_texture_evidence, rebuild_texture_families
 from config import APP_NAME, DEFAULT_SCAN_PATH, REPORTS_PATH, VERSION
 from database import Database
 from scanners import scan_models, scan_textures
@@ -17,14 +17,14 @@ def pause(): console.input("\nPress Enter to return...")
 
 def quick_status():
     db=Database(); rel=db.relationship_stats()
-    console.print(f"[bold]Database:[/bold] {db.count_models():,} models | {db.count_textures():,} textures | {rel['links']:,} links | {rel['families']:,} model families | {rel['texture_families']:,} texture families | {rel['evidence_pairs']:,} evidence pairs")
+    console.print(f"[bold]Database:[/bold] {db.count_models():,} models | {db.count_textures():,} textures | {rel['links']:,} links | {rel['families']:,} model families | {rel['texture_families']:,} texture families | {rel['evidence_pairs']:,} model evidence | {rel['texture_evidence_pairs']:,} texture evidence")
     db.close()
 
 def main_menu():
     while True:
         console.clear(); header(); quick_status()
         console.print(f"\n[bold]Default Resources:[/bold] {DEFAULT_SCAN_PATH}\n")
-        items=["Scan Manager","Research / Analysis","Search Models","Search Textures","Model Explorer","Texture Explorer","Duplicates","Families","Evidence Browser","Statistics","Exit"]
+        items=["Scan Manager","Research / Analysis","Search Models","Search Textures","Model Explorer","Texture Explorer","Duplicates","Families","Model Evidence Browser","Texture Evidence Browser","Statistics","Exit"]
         for i,x in enumerate(items,1): console.print(f"[bold]{i}.[/bold] {x}")
         c=console.input("\nChoice: ").strip()
         if c=="1": scan_manager()
@@ -72,7 +72,7 @@ def scan_manager():
 def research_menu():
     while True:
         console.clear(); header(); quick_status()
-        opts=["Rebuild Model ↔ Texture Links","Rebuild Model Families","Rebuild Texture Families","Rebuild Evidence Pairs","Export Evidence CSV","Back"]
+        opts=["Rebuild Model ↔ Texture Links","Rebuild Model Families","Rebuild Texture Families","Rebuild Model Evidence Pairs","Rebuild Texture Evidence Pairs","Export Model Evidence CSV","Export Texture Evidence CSV","Back"]
         for i,o in enumerate(opts,1): console.print(f"[bold]{i}.[/bold] {o}")
         c=console.input("\nChoice: ").strip()
         if c=="1": show_dict("Relationship Build Complete",progress_runner("Rebuilding links",rebuild_links))
@@ -160,7 +160,15 @@ def families_menu():
     console.print(tt); pause()
 
 def evidence_browser():
-    console.clear(); header(); db=Database(); rows=db.top_evidence(100); db.close(); render_evidence(rows,"Top Evidence Pairs"); pause()
+    console.clear(); header(); db=Database(); rows=db.top_evidence(100); db.close(); render_evidence(rows,"Top Model Evidence Pairs"); pause()
+
+def texture_evidence_browser():
+    console.clear(); header(); db=Database(); rows=db.top_texture_evidence(100); db.close(); render_texture_evidence(rows,"Top Texture Evidence Pairs"); pause()
+
+def render_texture_evidence(rows,title):
+    t=Table(title=title,header_style="bold cyan"); t.add_column("#",justify="right"); t.add_column("Score",justify="right"); t.add_column("Type"); t.add_column("Texture A"); t.add_column("Texture B"); t.add_column("Reasons")
+    for i,r in enumerate(rows,1): t.add_row(str(i),str(r["overall_score"]),r["evidence_type"],r["path_a"],r["path_b"],(r["reasons"] or "")[:70])
+    console.print(t)
 
 def export_evidence_csv():
     REPORTS_PATH.mkdir(parents=True,exist_ok=True); out=REPORTS_PATH/"evidence_pairs.csv"
@@ -170,10 +178,19 @@ def export_evidence_csv():
         for r in rows: w.writerow([r["overall_score"],r["binary_score"],r["texture_score"],r["string_score"],r["evidence_type"],r["path_a"],r["path_b"],r["reasons"]])
     console.print(f"[green]Exported:[/green] {out}"); pause()
 
+
+def export_texture_evidence_csv():
+    REPORTS_PATH.mkdir(parents=True,exist_ok=True); out=REPORTS_PATH/"texture_evidence_pairs.csv"
+    db=Database(); rows=db.top_texture_evidence(100000); db.close()
+    with out.open("w",newline="",encoding="utf-8") as f:
+        w=csv.writer(f); w.writerow(["overall_score","exact_score","perceptual_score","histogram_score","color_score","alpha_score","format_score","size_score","evidence_type","texture_a","texture_b","format_a","format_b","reasons"])
+        for r in rows: w.writerow([r["overall_score"],r["exact_score"],r["perceptual_score"],r["histogram_score"],r["color_score"],r["alpha_score"],r["format_score"],r["size_score"],r["evidence_type"],r["path_a"],r["path_b"],r["format_a"],r["format_b"],r["reasons"]])
+    console.print(f"[green]Exported:[/green] {out}"); pause()
+
 def stats():
     console.clear(); header(); db=Database(); ms=db.model_stats(); ts=db.texture_stats(); rel=db.relationship_stats(); fmts=db.texture_format_counts(); db.close()
     t=Table(title="Statistics",header_style="bold cyan"); t.add_column("Metric"); t.add_column("Value",justify="right")
-    for k,v in [("Models",ms["total"]),("Textures",ts["total"]),("DDS Textures",ts["dds_count"] or 0),("Model-Texture Links",rel["links"]),("Model Families",rel["families"]),("Texture Families",rel["texture_families"]),("Evidence Pairs",rel["evidence_pairs"])]:
+    for k,v in [("Models",ms["total"]),("Textures",ts["total"]),("DDS Textures",ts["dds_count"] or 0),("Model-Texture Links",rel["links"]),("Model Families",rel["families"]),("Texture Families",rel["texture_families"]),("Model Evidence Pairs",rel["evidence_pairs"]),("Texture Evidence Pairs",rel["texture_evidence_pairs"])]:
         t.add_row(k,f"{v:,}")
     t.add_row("Model Data",format_bytes(ms["total_size"])); t.add_row("Texture Data",format_bytes(ts["total_size"]))
     console.print(t)

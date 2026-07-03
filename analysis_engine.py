@@ -129,3 +129,94 @@ def rebuild_evidence(callback: Callable[[dict], None] | None = None, max_family_
             callback({"index": fi, "total": len(families), "relative_path": fam["name"], "links": added, "speed": fi / elapsed})
     db.commit(); db.close()
     return {"families_checked": len(families), "pairs_checked": pairs, "evidence_pairs": added, "elapsed": time.time() - started}
+
+
+def hex_hamming(a: str, b: str) -> int:
+    if not a or not b:
+        return 64
+    try:
+        return bin(int(a, 16) ^ int(b, 16)).count("1")
+    except Exception:
+        return 64
+
+
+def texture_pair_score(a, b):
+    reasons = []
+    exact = 100 if a["sha256"] and a["sha256"] == b["sha256"] else 0
+    if exact:
+        reasons.append("exact texture SHA")
+
+    hdist = hex_hamming(a["ahash"], b["ahash"])
+    perceptual = max(0, round(100 * (1 - hdist / 64))) if a["ahash"] and b["ahash"] else 0
+    if perceptual >= 95:
+        reasons.append("near-identical perceptual hash")
+    elif perceptual >= 85:
+        reasons.append("similar perceptual hash")
+
+    histogram = 100 if a["histogram_hash"] and a["histogram_hash"] == b["histogram_hash"] else 0
+    if histogram:
+        reasons.append("same color histogram")
+
+    color_dist = math.sqrt((float(a["avg_r"] or 0)-float(b["avg_r"] or 0))**2 + (float(a["avg_g"] or 0)-float(b["avg_g"] or 0))**2 + (float(a["avg_b"] or 0)-float(b["avg_b"] or 0))**2)
+    color = max(0, round(100 - (color_dist / 441.7) * 100))
+
+    alpha = max(0, round(100 - abs(float(a["alpha_coverage"] or 0) - float(b["alpha_coverage"] or 0)) * 100))
+    fmt = 100 if a["dds_format"] and a["dds_format"] == b["dds_format"] else 0
+
+    size_score = 0
+    aw, ah = a["width"] or a["dds_width"], a["height"] or a["dds_height"]
+    bw, bh = b["width"] or b["dds_width"], b["height"] or b["dds_height"]
+    if aw and ah and bw and bh:
+        if aw == bw and ah == bh:
+            size_score = 100
+            reasons.append("same resolution")
+        elif abs((aw/ah)-(bw/bh)) < 0.02:
+            size_score = 70
+            reasons.append("same aspect ratio")
+
+    if exact:
+        overall = 100
+        etype = "identical_texture"
+    else:
+        overall = round(perceptual*0.32 + histogram*0.25 + color*0.18 + alpha*0.10 + fmt*0.05 + size_score*0.10)
+        if histogram >= 100 and perceptual < 95:
+            etype = "likely_recolor_or_adjustment"
+            reasons.append("histogram match with perceptual difference")
+        elif perceptual >= 92 and color >= 90:
+            etype = "near_identical_texture"
+        elif perceptual >= 80 and (abs(float(a["brightness"] or 0)-float(b["brightness"] or 0)) > .08 or abs(float(a["saturation"] or 0)-float(b["saturation"] or 0)) > .08):
+            etype = "likely_brightness_or_saturation_variant"
+            reasons.append("brightness/saturation differs")
+        elif overall >= 75:
+            etype = "likely_derived_texture"
+        elif overall >= 60:
+            etype = "possible_texture_relationship"
+        else:
+            etype = "weak"
+
+    return overall, exact, perceptual, histogram, color, alpha, fmt, size_score, etype, "; ".join(reasons)
+
+
+def rebuild_texture_evidence(callback: Callable[[dict], None] | None = None, max_family_size: int = 150) -> dict:
+    db = Database()
+    started = time.time()
+    db.clear_texture_evidence()
+    families = db.texture_families(100000)
+    checked = added = 0
+    db.begin()
+    for fi, fam in enumerate(families, 1):
+        members = db.texture_family_members(fam["id"], max_family_size)
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                vals = texture_pair_score(members[i], members[j])
+                checked += 1
+                if vals[0] >= 60:
+                    db.add_texture_evidence(members[i]["path"], members[j]["path"], *vals)
+                    added += 1
+        if fi % 100 == 0:
+            db.commit(); db.begin()
+        if callback:
+            elapsed = max(time.time() - started, .001)
+            callback({"index": fi, "total": len(families), "relative_path": fam["name"], "links": added, "speed": fi / elapsed})
+    db.commit(); db.close()
+    return {"texture_families_checked": len(families), "pairs_checked": checked, "texture_evidence_pairs": added, "elapsed": time.time() - started}

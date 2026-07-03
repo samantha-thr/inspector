@@ -135,7 +135,8 @@ class Database:
         mf = dict(self.db.execute("SELECT COUNT(*) families, COALESCE(SUM(member_count),0) family_members FROM model_families").fetchone())
         tf = dict(self.db.execute("SELECT COUNT(*) texture_families, COALESCE(SUM(member_count),0) texture_family_members FROM texture_families").fetchone())
         ev = dict(self.db.execute("SELECT COUNT(*) evidence_pairs FROM evidence_pairs").fetchone())
-        return links | mf | tf | ev
+        tev = dict(self.db.execute("SELECT COUNT(*) texture_evidence_pairs FROM texture_evidence_pairs").fetchone())
+        return links | mf | tf | ev | tev
     def texture_format_counts(self): return self.db.execute("SELECT COALESCE(NULLIF(dds_format,''), extension) format, COUNT(*) count FROM textures GROUP BY format ORDER BY count DESC").fetchall()
 
     def search_models(self, term, limit=100):
@@ -173,9 +174,21 @@ class Database:
         fid=self.db.execute("SELECT last_insert_rowid()").fetchone()[0]
         for t in members: self.db.execute("INSERT OR REPLACE INTO texture_family_members(family_id,texture_path,confidence) VALUES(?,?,?)", (fid,t["path"],confidence))
     def texture_families(self, limit=100): return self.db.execute("SELECT * FROM texture_families ORDER BY member_count DESC,confidence DESC LIMIT ?", (limit,)).fetchall()
+    def texture_family_members(self, fid, limit=500): return self.db.execute("SELECT tfm.*, t.* FROM texture_family_members tfm JOIN textures t ON t.path=tfm.texture_path WHERE family_id=? ORDER BY t.folder,t.filename LIMIT ?", (fid,limit)).fetchall()
 
     def clear_evidence(self): self.db.execute("DELETE FROM evidence_pairs"); self.commit()
     def add_evidence(self, model_a, model_b, overall, binary, texture, string, evidence_type, reasons):
         self.db.execute("INSERT INTO evidence_pairs(model_a,model_b,overall_score,binary_score,texture_score,string_score,evidence_type,reasons,created) VALUES(?,?,?,?,?,?,?,?,?)", (model_a,model_b,overall,binary,texture,string,evidence_type,reasons,time.time()))
     def top_evidence(self, limit=100): return self.db.execute("""SELECT e.*, a.relative_path path_a, b.relative_path path_b FROM evidence_pairs e JOIN models a ON a.path=e.model_a JOIN models b ON b.path=e.model_b ORDER BY overall_score DESC LIMIT ?""", (limit,)).fetchall()
     def evidence_for_model(self, model_path, limit=100): return self.db.execute("""SELECT e.*, a.relative_path path_a, b.relative_path path_b FROM evidence_pairs e JOIN models a ON a.path=e.model_a JOIN models b ON b.path=e.model_b WHERE model_a=? OR model_b=? ORDER BY overall_score DESC LIMIT ?""", (model_path,model_path,limit)).fetchall()
+
+
+    # texture evidence
+    def clear_texture_evidence(self): self.db.execute("DELETE FROM texture_evidence_pairs"); self.commit()
+    def add_texture_evidence(self, texture_a, texture_b, overall, exact, perceptual, histogram, color, alpha, fmt, size, evidence_type, reasons):
+        self.db.execute("""INSERT INTO texture_evidence_pairs(texture_a,texture_b,overall_score,exact_score,perceptual_score,histogram_score,color_score,alpha_score,format_score,size_score,evidence_type,reasons,created)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (texture_a,texture_b,overall,exact,perceptual,histogram,color,alpha,fmt,size,evidence_type,reasons,time.time()))
+    def top_texture_evidence(self, limit=100): return self.db.execute("""SELECT e.*, a.relative_path path_a, b.relative_path path_b, a.dds_format format_a, b.dds_format format_b, a.width width_a, a.height height_a, b.width width_b, b.height height_b
+            FROM texture_evidence_pairs e JOIN textures a ON a.path=e.texture_a JOIN textures b ON b.path=e.texture_b ORDER BY overall_score DESC LIMIT ?""", (limit,)).fetchall()
+    def texture_evidence_for_texture(self, texture_path, limit=100): return self.db.execute("""SELECT e.*, a.relative_path path_a, b.relative_path path_b
+            FROM texture_evidence_pairs e JOIN textures a ON a.path=e.texture_a JOIN textures b ON b.path=e.texture_b WHERE texture_a=? OR texture_b=? ORDER BY overall_score DESC LIMIT ?""", (texture_path,texture_path,limit)).fetchall()
