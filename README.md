@@ -1,19 +1,23 @@
-# There Inspector v2.2.1
+# There Inspector v2.3.0
 
-## Fix
+## Fixes
 
-Fixes startup crash:
+- Evidence CSV exports now use timestamped filenames so Windows/Excel file locks do not cause permission errors.
+- Exports are written to:
+  - `reports/evidence/model_evidence_pairs_YYYYMMDD_HHMMSS.csv`
+  - `reports/evidence/texture_evidence_pairs_YYYYMMDD_HHMMSS.csv`
 
-```text
-sqlite3.OperationalError: no such table: texture_evidence_pairs
-```
+## Texture evidence improvement
 
-This version forces the `texture_evidence_pairs` table and indexes to be created during database initialization.
+Texture evidence no longer depends on rebuilding texture families first. It directly builds candidate groups from:
 
-## After updating
+- exact SHA256
+- perceptual average hash
+- color histogram hash
 
-Start There Inspector normally. Then run:
+This should prevent the `0 texture evidence` issue when texture families exist but the evidence table has not been populated.
 
-```text
-Research / Analysis > Rebuild Texture Evidence Pairs
-```
+## Recommended after updating
+
+1. Research / Analysis > Rebuild Texture Evidence Pairs
+2. Research / Analysis > Export Texture Evidence CSV
