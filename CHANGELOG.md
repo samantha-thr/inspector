@@ -1,12 +1,10 @@
 # Changelog
 
-## v2.3.0
+## v2.4.0
 
-- Fixed CSV export PermissionError by using timestamped report filenames.
-- Moved evidence exports into `reports/evidence/`.
-- Reworked texture evidence builder so it can generate evidence directly from texture fingerprints.
-- Texture evidence no longer requires texture families to be rebuilt first.
-
-## v2.2.1
-
-- Fixed missing `texture_evidence_pairs` table on upgraded v2 databases.
+- Added one-click Full Analysis pipeline.
+- Added Full Analysis - Incremental Scans.
+- Added Full Analysis - Full Rescan.
+- Added automatic evidence CSV exports at the end of full analysis.
+- Added full analysis summary text report.
+- Added progress across all full-analysis stages.

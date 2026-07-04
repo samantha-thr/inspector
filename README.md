@@ -1,23 +1,31 @@
-# There Inspector v2.3.0
+# There Inspector v2.4.0
 
-## Fixes
+## New
 
-- Evidence CSV exports now use timestamped filenames so Windows/Excel file locks do not cause permission errors.
-- Exports are written to:
-  - `reports/evidence/model_evidence_pairs_YYYYMMDD_HHMMSS.csv`
-  - `reports/evidence/texture_evidence_pairs_YYYYMMDD_HHMMSS.csv`
+Adds one-click **Full Analysis** options in both **Scan Manager** and **Research / Analysis**.
 
-## Texture evidence improvement
+Options:
 
-Texture evidence no longer depends on rebuilding texture families first. It directly builds candidate groups from:
+- **Full Analysis - Incremental Scans**
+- **Full Analysis - Full Rescan**
 
-- exact SHA256
-- perceptual average hash
-- color histogram hash
+Pipeline order:
 
-This should prevent the `0 texture evidence` issue when texture families exist but the evidence table has not been populated.
+1. Model scan
+2. Texture scan
+3. Rebuild model ↔ texture links
+4. Rebuild model families
+5. Rebuild texture families
+6. Rebuild model evidence pairs
+7. Rebuild texture evidence pairs
+8. Export model evidence CSV
+9. Export texture evidence CSV
+10. Export full analysis summary
 
-## Recommended after updating
+Reports:
 
-1. Research / Analysis > Rebuild Texture Evidence Pairs
-2. Research / Analysis > Export Texture Evidence CSV
+```text
+reports/evidence/model_evidence_pairs_YYYYMMDD_HHMMSS.csv
+reports/evidence/texture_evidence_pairs_YYYYMMDD_HHMMSS.csv
+reports/analysis/full_analysis_summary_YYYYMMDD_HHMMSS.txt
+```
