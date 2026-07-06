@@ -353,40 +353,40 @@ class Database:
             FROM texture_evidence_pairs e JOIN textures a ON a.path=e.texture_a JOIN textures b ON b.path=e.texture_b
             WHERE texture_a=? OR texture_b=? ORDER BY overall_score DESC LIMIT ?""", (texture_path, texture_path, limit)).fetchall()
 
-    def texture_evidence_candidate_groups(self):
-        """Return candidate texture groups directly from texture fingerprints.
+    def ensure_analysis_runs_table(self):
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS analysis_runs(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_type TEXT,
+                started REAL,
+                finished REAL,
+                status TEXT,
+                summary TEXT
+            )
+        """)
+        self.commit()
 
-        Used by rebuild_texture_evidence(). This lets texture evidence build
-        from SHA256 / perceptual hash / histogram groups without depending on
-        texture_families being rebuilt first.
-        """
-        groups = []
-        for method, expr, confidence in [
-            ("exact_sha256", "sha256", 100),
-            ("perceptual_ahash", "ahash", 80),
-            ("color_histogram", "histogram_hash", 70),
-        ]:
-            rows = self.db.execute(f"""
-                SELECT {expr} key_value, COUNT(*) count
-                FROM textures
-                WHERE {expr} IS NOT NULL AND {expr} != ''
-                GROUP BY key_value
-                HAVING COUNT(*) > 1
-                ORDER BY count DESC
-            """).fetchall()
-            for row in rows:
-                groups.append({
-                    "method": method,
-                    "expr": expr,
-                    "key_value": row["key_value"],
-                    "count": row["count"],
-                    "confidence": confidence,
-                })
-        return groups
+    def begin_analysis_run(self, run_type):
+        self.ensure_analysis_runs_table()
+        now = time.time()
+        self.db.execute(
+            "INSERT INTO analysis_runs(run_type,started,finished,status,summary) VALUES(?,?,?,?,?)",
+            (run_type, now, 0, "running", ""),
+        )
+        self.commit()
+        return int(self.db.execute("SELECT last_insert_rowid()").fetchone()[0])
 
-    def texture_members_for_group(self, expr, key, limit=500):
-        """Return texture rows for one evidence candidate group."""
+    def finish_analysis_run(self, run_id, status="complete", summary=""):
+        self.ensure_analysis_runs_table()
+        self.db.execute(
+            "UPDATE analysis_runs SET finished=?, status=?, summary=? WHERE id=?",
+            (time.time(), status, summary, run_id),
+        )
+        self.commit()
+
+    def recent_analysis_runs(self, limit=20):
+        self.ensure_analysis_runs_table()
         return self.db.execute(
-            f"SELECT * FROM textures WHERE {expr}=? ORDER BY folder,filename LIMIT ?",
-            (key, limit),
+            "SELECT * FROM analysis_runs ORDER BY id DESC LIMIT ?",
+            (limit,),
         ).fetchall()

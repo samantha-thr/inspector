@@ -1,0 +1,123 @@
+{
+  "version": "1.0",
+  "description": "Default There Inspector knowledge pack. Human-readable conventions for There.com resources.",
+  "folders": {
+    "bg": {
+      "label": "Buggy",
+      "category": "Vehicle",
+      "confidence": 100,
+      "notes": "Buggy models and textures. _1 is body, _2/_3 are window layers."
+    },
+    "hbk": {
+      "label": "Hoverbike",
+      "category": "Vehicle",
+      "confidence": 90,
+      "notes": "Likely hoverbike assets."
+    },
+    "fu": {
+      "label": "Furniture",
+      "category": "Furniture",
+      "confidence": 90,
+      "notes": "Likely furniture/player products."
+    },
+    "fl": {
+      "label": "Flowers",
+      "category": "Decor",
+      "confidence": 90,
+      "notes": "Likely flower/decor assets."
+    },
+    "prop": {
+      "label": "Props",
+      "category": "Prop",
+      "confidence": 90,
+      "notes": "General props."
+    },
+    "cm": {
+      "label": "Community / Creator Models",
+      "category": "Mixed",
+      "confidence": 60,
+      "notes": "Mixed named and creator assets."
+    },
+    "tv": {
+      "label": "Television / Video",
+      "category": "Media",
+      "confidence": 80,
+      "notes": "TV/video screen resources."
+    },
+    "video": {
+      "label": "Video",
+      "category": "Media",
+      "confidence": 90,
+      "notes": "Video/screen resources."
+    },
+    "terrain": {
+      "label": "Terrain",
+      "category": "Environment",
+      "confidence": 90,
+      "notes": "Terrain/environment resources."
+    },
+    "clubmakena": {
+      "label": "Club Makena",
+      "category": "Place",
+      "confidence": 90,
+      "notes": "Club Makena place/building resources."
+    }
+  },
+  "texture_roles": [
+    {
+      "folder": "bg",
+      "suffixes": [
+        "_1",
+        "_1.jpg",
+        "_1.png"
+      ],
+      "role": "body_template",
+      "weight": 1.0,
+      "confidence": 95,
+      "notes": "Buggy main body template; high-value evidence."
+    },
+    {
+      "folder": "bg",
+      "suffixes": [
+        "_2",
+        "_2.jpg",
+        "_2.png",
+        "_3",
+        "_3.jpg",
+        "_3.png"
+      ],
+      "role": "window_layer",
+      "weight": 0.15,
+      "confidence": 95,
+      "notes": "Buggy window layers; likely false positives and down-weighted."
+    },
+    {
+      "folder": "*",
+      "suffixes": [
+        "_mask",
+        "_alpha"
+      ],
+      "role": "mask_or_alpha",
+      "weight": 0.25,
+      "confidence": 70,
+      "notes": "Mask/alpha textures are common false-positive sources."
+    }
+  ],
+  "assumptions": [
+    {
+      "key": "named_assets",
+      "value": "Named assets are likely official/template/base assets unless evidence suggests otherwise.",
+      "confidence": 80
+    },
+    {
+      "key": "numeric_assets",
+      "value": "Numeric filenames are likely player-created product IDs.",
+      "confidence": 85
+    },
+    {
+      "key": "base_textures",
+      "value": "Highly reused flat, mask, sky, glass, window, or template textures should be down-weighted in IP/reuse suspicion.",
+      "confidence": 85
+    }
+  ]
+}

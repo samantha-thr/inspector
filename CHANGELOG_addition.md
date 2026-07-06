@@ -1,4 +1,6 @@
-## 2.7.0 Foundation
-- Began workflow-driven UI transition.
-- Introduced future-facing menu structure.
-- Preserved existing analysis features while preparing for plugin architecture.
+# Changelog Addition
+
+## v2.7.1
+
+- Fixed Analysis Run History crash caused by missing `Database.recent_analysis_runs()`.
+- Added compatibility-safe `analysis_runs` helper methods.
