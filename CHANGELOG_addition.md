@@ -1,6 +1,6 @@
 # Changelog Addition
 
-## v2.7.1
+## v2.7.2
 
-- Fixed Analysis Run History crash caused by missing `Database.recent_analysis_runs()`.
-- Added compatibility-safe `analysis_runs` helper methods.
+- Fixed Texture Evidence Pairs crash by adding analysis-engine fallback helpers.
+- Full Analysis no longer depends on `Database.texture_evidence_candidate_groups()` existing.

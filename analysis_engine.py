@@ -324,6 +324,51 @@ def texture_pair_score(a, b):
     return overall, exact, perceptual, histogram, color, alpha, fmt, size_score, etype, "; ".join(reasons)
 
 
+
+def texture_evidence_candidate_groups_safe(db):
+    """Return texture evidence candidate groups.
+
+    v2.7.2 hotfix:
+    Some upgraded installs do not yet have Database.texture_evidence_candidate_groups().
+    This fallback queries the textures table directly so texture evidence can continue.
+    """
+    if hasattr(db, "texture_evidence_candidate_groups"):
+        return db.texture_evidence_candidate_groups()
+
+    groups = []
+    for method, expr, confidence in [
+        ("exact_sha256", "sha256", 100),
+        ("perceptual_ahash", "ahash", 80),
+        ("color_histogram", "histogram_hash", 70),
+    ]:
+        rows = db.db.execute(f"""
+            SELECT {expr} key_value, COUNT(*) count
+            FROM textures
+            WHERE {expr} IS NOT NULL AND {expr} != ''
+            GROUP BY key_value
+            HAVING COUNT(*) > 1
+            ORDER BY count DESC
+        """).fetchall()
+        for row in rows:
+            groups.append({
+                "method": method,
+                "expr": expr,
+                "key_value": row["key_value"],
+                "count": row["count"],
+                "confidence": confidence,
+            })
+    return groups
+
+
+def texture_members_for_group_safe(db, expr, key, limit=500):
+    """Return textures for a candidate group, with DB-method fallback."""
+    if hasattr(db, "texture_members_for_group"):
+        return db.texture_members_for_group(expr, key, limit)
+    return db.db.execute(
+        f"SELECT * FROM textures WHERE {expr}=? ORDER BY folder,filename LIMIT ?",
+        (key, limit),
+    ).fetchall()
+
 def rebuild_texture_evidence(callback: Callable[[dict], None] | None = None, max_group_size: int = 200) -> dict:
     """Build texture-only evidence directly from texture fingerprints.
 
@@ -334,7 +379,7 @@ def rebuild_texture_evidence(callback: Callable[[dict], None] | None = None, max
     started = time.time()
     db.clear_texture_evidence()
 
-    groups = db.texture_evidence_candidate_groups()
+    groups = texture_evidence_candidate_groups_safe(db)
     checked = added = skipped_downweighted = 0
     seen_pairs = set()
     role_skips: dict[str, int] = {}
@@ -342,7 +387,7 @@ def rebuild_texture_evidence(callback: Callable[[dict], None] | None = None, max
     db.begin()
 
     for gi, group in enumerate(groups, 1):
-        members = db.texture_members_for_group(group["expr"], group["key_value"], max_group_size)
+        members = texture_members_for_group_safe(db, group["expr"], group["key_value"], max_group_size)
 
         for i in range(len(members)):
             for j in range(i + 1, len(members)):
