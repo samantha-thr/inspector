@@ -26,22 +26,19 @@ def quick_status():
 def main_menu():
     while True:
         console.clear(); header(); quick_status(); console.print(f"\n[bold]Default Resources:[/bold] {DEFAULT_SCAN_PATH}\n")
-        items=['Scan Manager','Research / Analysis','Asset Intelligence','Search Models','Search Textures','Model Explorer','Texture Explorer','Duplicates','Families','Model Evidence Browser','Texture Evidence Browser','Statistics','Exit']
+        items=['Analyze Resources','Investigate Assets','Browse Library','Knowledge Base','Reports','Settings','Legacy Tools','Exit']
         for i,x in enumerate(items,1): console.print(f"[bold]{i}.[/bold] {x}")
         c=console.input('\nChoice: ').strip()
         if c=='1': scan_manager()
-        elif c=='2': research_menu()
-        elif c=='3': intelligence_menu()
-        elif c=='4': search_models()
-        elif c=='5': search_textures()
-        elif c=='6': model_explorer()
-        elif c=='7': texture_explorer()
-        elif c=='8': duplicates_menu()
-        elif c=='9': families_menu()
-        elif c=='10': evidence_browser()
-        elif c=='11': texture_evidence_browser()
-        elif c=='12': stats()
-        elif c=='13': return
+        elif c=='2': intelligence_menu()
+        elif c=='3': search_models()
+        elif c=='4': console.print('[yellow]Knowledge Base framework coming in 2.7.1[/yellow]'); pause()
+        elif c=='5': research_menu()
+        elif c=='6': console.print('[yellow]Settings framework coming in 2.7.1[/yellow]'); pause()
+        elif c=='7':
+            console.print('[cyan]Legacy tools remain available through the existing menus during the 2.7 transition.[/cyan]')
+            search_textures()
+        elif c=='8': return
 
 def progress_runner(title, func, *args, **kwargs):
     console.clear(); header(); console.print(f"[green]{title}[/green]\n")
