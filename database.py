@@ -352,3 +352,41 @@ class Database:
         return self.db.execute("""SELECT e.*, a.relative_path path_a, b.relative_path path_b
             FROM texture_evidence_pairs e JOIN textures a ON a.path=e.texture_a JOIN textures b ON b.path=e.texture_b
             WHERE texture_a=? OR texture_b=? ORDER BY overall_score DESC LIMIT ?""", (texture_path, texture_path, limit)).fetchall()
+
+    def texture_evidence_candidate_groups(self):
+        """Return candidate texture groups directly from texture fingerprints.
+
+        Used by rebuild_texture_evidence(). This lets texture evidence build
+        from SHA256 / perceptual hash / histogram groups without depending on
+        texture_families being rebuilt first.
+        """
+        groups = []
+        for method, expr, confidence in [
+            ("exact_sha256", "sha256", 100),
+            ("perceptual_ahash", "ahash", 80),
+            ("color_histogram", "histogram_hash", 70),
+        ]:
+            rows = self.db.execute(f"""
+                SELECT {expr} key_value, COUNT(*) count
+                FROM textures
+                WHERE {expr} IS NOT NULL AND {expr} != ''
+                GROUP BY key_value
+                HAVING COUNT(*) > 1
+                ORDER BY count DESC
+            """).fetchall()
+            for row in rows:
+                groups.append({
+                    "method": method,
+                    "expr": expr,
+                    "key_value": row["key_value"],
+                    "count": row["count"],
+                    "confidence": confidence,
+                })
+        return groups
+
+    def texture_members_for_group(self, expr, key, limit=500):
+        """Return texture rows for one evidence candidate group."""
+        return self.db.execute(
+            f"SELECT * FROM textures WHERE {expr}=? ORDER BY folder,filename LIMIT ?",
+            (key, limit),
+        ).fetchall()
