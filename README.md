@@ -1,5 +1,34 @@
-# There Inspector v2.5.0
+# There Inspector v2.6.0
 
-Adds the Asset Intelligence Layer: reuse score, suspicion score, fingerprint score, asset flags, folder intelligence, and CSV export.
+## New: Texture Comparison Rules / False Positive Reduction
 
-Run: Research / Analysis > Rebuild Asset Intelligence
+v2.6 pushes texture comparison farther by adding role-aware down-weighting.
+
+New texture rules:
+
+- `bg\` buggy convention:
+  - `_1` = buggy body texture, high-value comparison
+  - `_2` / `_3` = buggy window layers, heavily down-weighted
+- flat / single-color / mask-like textures are down-weighted
+- named textures are treated as likely official/template/base resources
+- numeric PID `_1` textures are treated as high-value primary artwork
+- numeric PID secondary slots are treated as moderate value
+
+## Why this matters
+
+Common base textures and window layers were likely creating false positives. v2.6 keeps tracking them, but they should no longer drive suspicion scores or texture evidence results.
+
+## Recommended after updating
+
+Run:
+
+```text
+Research / Analysis > Rebuild Texture Evidence Pairs
+Research / Analysis > Rebuild Asset Intelligence
+```
+
+Or run:
+
+```text
+Research / Analysis > Full Analysis - Incremental Scans
+```
