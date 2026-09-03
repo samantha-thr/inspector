@@ -677,6 +677,13 @@ def export_obj(
     linked_textures: list[str | Path] | None = None,
     include_collision: bool = True,
 ) -> dict[str, Any]:
+    """Export a decoded There model as OBJ.
+
+    v2.7.5 refinement:
+    - one OBJ object/group per actual LOD instead of one object per component
+    - component/material boundaries are retained through usemtl statements
+    - geometry is already expressed in Blender Z-up coordinates
+    """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -688,6 +695,8 @@ def export_obj(
     lines = [
         "# There Inspector native SOM v10 decode",
         f"# source: {model.path}",
+        "# Coordinate system: Blender Z-up / Y-forward",
+        "# Blender OBJ import: forward_axis='Y', up_axis='Z'",
         f"mtllib {mtl_path.name}",
     ]
 
@@ -696,21 +705,16 @@ def export_obj(
     normal_offset = 1
 
     for lod in model.lods:
+        object_name = f"LOD{lod.index}"
+        lines.append(f"o {object_name}")
+        lines.append(f"g {object_name}")
+
         for mesh_index, mesh in enumerate(lod.meshes):
-            node_name = (
-                model.nodes[mesh.node_index].name
-                if 0 <= mesh.node_index < len(model.nodes)
-                else f"node_{mesh.node_index}"
-            )
             material_name = (
                 model.materials[mesh.material_index].name
                 if 0 <= mesh.material_index < len(model.materials)
                 else f"Material_{mesh.material_index}"
             )
-
-            object_name = f"LOD{lod.index}_{_safe_name(node_name)}_{mesh_index}"
-            lines.append(f"o {object_name}")
-            lines.append(f"g {object_name}")
             lines.append(f"usemtl {_safe_name(material_name)}")
 
             has_uv = all(v.uv0 is not None for v in mesh.vertices)
@@ -778,7 +782,6 @@ def export_obj(
         ])
         texture = texture_assignments.get(material.index)
         if texture:
-            # Use absolute forward-slash path so Blender can find DDS files.
             mtl_lines.append(f"map_Kd {texture.resolve().as_posix()}")
         mtl_lines.append("")
 
@@ -789,7 +792,8 @@ def export_obj(
         "output": str(output_path),
         "material_library": str(mtl_path),
         "lods": len(model.lods),
-        "meshes": sum(len(lod.meshes) for lod in model.lods),
+        "lod_objects": len(model.lods),
+        "components": sum(len(lod.meshes) for lod in model.lods),
         "vertices": model.vertex_count,
         "triangles": model.triangle_count,
         "collision": model.collision is not None,

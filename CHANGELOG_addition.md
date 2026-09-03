@@ -1,9 +1,9 @@
 # Changelog Addition
 
-## v2.7.4
+## v2.7.5
 
-- Added native SOM v10 `.model` decoder.
-- Added direct OBJ generation.
-- Added LOD, node, material, UV, normal, collision and index decoding.
-- Enabled `.blend`, `.glb` and `.gltf` conversion through Blender background mode.
-- Added best-effort linked DDS material assignment.
+- Fixed duplicate-looking LOD objects by consolidating model components into one OBJ/Blender object per actual LOD.
+- Fixed 90-degree face-down Blender conversions by explicitly importing decoded geometry as Y-forward / Z-up.
+- Added `master` parent object to converted Blender scenes.
+- Added LOD distance custom properties to `master` and LOD objects.
+- Improved OBJ naming and conversion metadata.

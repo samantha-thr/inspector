@@ -154,8 +154,8 @@ def conversion_readiness(sample_model: str | Path | None = None) -> ConversionRe
     notes = [
         "Native SOM v10 geometry decoding is enabled.",
         "OBJ can be generated directly without Blender.",
-        "BLEND / GLB / GLTF use Blender background mode after native OBJ reconstruction.",
-        "LOD meshes, UV0, normals, material groups, collision geometry, nodes and LOD distances are decoded.",
+        "BLEND / GLB / GLTF use Blender background mode with explicit Blender Z-up axis handling.",
+        "LOD components are consolidated to one Blender object per actual LOD; UV0, normals, material groups, collision geometry, nodes and LOD distances are decoded.",
         "Texture assignment is best-effort: Inspector-linked DDS files are preferred over embedded placeholder paths.",
     ]
     if not blender:
@@ -297,9 +297,17 @@ def _write_blender_bridge_script(
     source_obj: Path,
     output_path: Path,
     output_format: str,
+    lod_distances: list[float] | None = None,
 ) -> Path:
+    """Create Blender bridge script with explicit axis handling.
+
+    The decoded OBJ is already Blender Z-up. Blender's default OBJ importer
+    assumes a different source axis and was adding a 90-degree X rotation.
+    v2.7.5 explicitly imports as Y-forward / Z-up so objects remain upright.
+    """
     _ensure_dirs()
     script = JOBS_DIR / f"blender_bridge_{int(time.time() * 1000)}.py"
+    lod_distances = list(lod_distances or [])
 
     code = "\n".join([
         "import bpy",
@@ -307,12 +315,56 @@ def _write_blender_bridge_script(
         f"source = Path({str(source_obj)!r})",
         f"out = Path({str(output_path)!r})",
         f"fmt = {output_format!r}",
+        f"lod_distances = {lod_distances!r}",
         "bpy.ops.object.select_all(action='SELECT')",
         "bpy.ops.object.delete(use_global=False)",
+        "",
+        "# The decoded OBJ is already in Blender coordinates: Y-forward, Z-up.",
         "try:",
-        "    bpy.ops.wm.obj_import(filepath=str(source))",
+        "    bpy.ops.wm.obj_import(",
+        "        filepath=str(source),",
+        "        forward_axis='Y',",
+        "        up_axis='Z',",
+        "    )",
         "except Exception:",
-        "    bpy.ops.import_scene.obj(filepath=str(source))",
+        "    bpy.ops.import_scene.obj(",
+        "        filepath=str(source),",
+        "        axis_forward='Y',",
+        "        axis_up='Z',",
+        "    )",
+        "",
+        "# Normalize names and hierarchy: master -> COL / LOD0 / LOD1 / LOD2 ...",
+        "master = bpy.data.objects.get('master')",
+        "if master is None:",
+        "    master = bpy.data.objects.new('master', None)",
+        "    bpy.context.scene.collection.objects.link(master)",
+        "",
+        "for i, distance in enumerate(lod_distances):",
+        "    master[f'LOD{i}'] = float(distance)",
+        "",
+        "for obj in list(bpy.context.scene.objects):",
+        "    if obj is master:",
+        "        continue",
+        "    base = obj.name.split('.')[0]",
+        "    if base.startswith('LOD'):",
+        "        # Current OBJ writes exactly one object per LOD.",
+        "        obj.name = base",
+        "        obj.parent = master",
+        "        try:",
+        "            idx = int(base[3:])",
+        "            if idx < len(lod_distances):",
+        "                obj['LOD_DISTANCE'] = float(lod_distances[idx])",
+        "        except Exception:",
+        "            pass",
+        "    elif base == 'COL':",
+        "        obj.name = 'COL'",
+        "        obj.parent = master",
+        "",
+        "# No corrective 90-degree rotation should remain.",
+        "for obj in bpy.context.scene.objects:",
+        "    if obj.type == 'MESH':",
+        "        obj.rotation_euler = (0.0, 0.0, 0.0)",
+        "",
         "out.parent.mkdir(parents=True, exist_ok=True)",
         "if fmt == 'blend':",
         "    bpy.ops.wm.save_as_mainfile(filepath=str(out))",
@@ -384,7 +436,19 @@ def execute_conversion_job(job: ConversionJob) -> dict:
             "message": f"{type(exc).__name__}: {exc}",
         }
 
-    script = _write_blender_bridge_script(temp_obj, target, job.output_format)
+    lod_distances = []
+    try:
+        decoded_for_metadata = decode_model(model_path)
+        lod_distances = [float(lod.distance) for lod in decoded_for_metadata.lods]
+    except Exception:
+        pass
+
+    script = _write_blender_bridge_script(
+        temp_obj,
+        target,
+        job.output_format,
+        lod_distances=lod_distances,
+    )
     proc = subprocess.run(
         [blender, "--background", "--python", str(script)],
         capture_output=True,

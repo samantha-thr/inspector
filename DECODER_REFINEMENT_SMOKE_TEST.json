@@ -1,0 +1,33 @@
+{
+  "podium.model": {
+    "decoder_lods": 3,
+    "obj_objects": [
+      "LOD0",
+      "LOD1",
+      "LOD2",
+      "COL"
+    ],
+    "lod_objects": [
+      "LOD0",
+      "LOD1",
+      "LOD2"
+    ],
+    "lod_object_count": 3,
+    "collision": true
+  },
+  "m00_tuv.model": {
+    "decoder_lods": 3,
+    "obj_objects": [
+      "LOD0",
+      "LOD1",
+      "LOD2"
+    ],
+    "lod_objects": [
+      "LOD0",
+      "LOD1",
+      "LOD2"
+    ],
+    "lod_object_count": 3,
+    "collision": false
+  }
+}
