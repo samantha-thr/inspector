@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 
 APP_NAME = "There Inspector"
-VERSION = "2.7.2"
+VERSION = "2.7.3"
 
 DEFAULT_SCAN_PATH = r"C:\Makena\There\ThereClient\Resources"
 DATABASE_PATH = Path("database") / "inspector_v2.db"

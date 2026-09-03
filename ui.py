@@ -14,6 +14,7 @@ from config import APP_NAME, DEFAULT_SCAN_PATH, REPORTS_PATH, VERSION
 from database import Database
 from intelligence_engine import ensure_intelligence_schema, rebuild_asset_intelligence
 from knowledge import KnowledgeBase
+from model_converter import conversion_jobs, conversion_readiness, execute_conversion_job, prepare_conversion_job, prepare_folder_jobs
 from pipeline import full_analysis_steps, run_step
 from scanners import scan_models, scan_textures
 from utils import format_bytes, format_seconds
@@ -317,6 +318,7 @@ def browse_library_menu():
             "Model Explorer",
             "Texture Explorer",
             "Families",
+            "Model Conversion Lab",
             "Back",
         ]
         for i, o in enumerate(opts, 1):
@@ -328,7 +330,8 @@ def browse_library_menu():
         elif c == "4": model_explorer()
         elif c == "5": texture_explorer()
         elif c == "6": families_menu()
-        elif c == "7": return
+        elif c == "7": model_conversion_menu()
+        elif c == "8": return
 
 
 def knowledge_base_menu():
@@ -416,6 +419,73 @@ def legacy_tools_menu():
         elif c == "7": duplicates_menu()
         elif c == "8": return
 
+
+# ------------------------------------------------------------------
+# Model conversion
+# ------------------------------------------------------------------
+
+def model_conversion_menu():
+    while True:
+        console.clear(); header()
+        console.print("[bold cyan]Model Conversion Lab[/bold cyan]\n")
+        opts = ["Conversion Readiness / Blender Check", "Prepare Single .model Conversion", "Prepare Folder Conversion Jobs", "View Recent Conversion Jobs", "Attempt Conversion Now", "Back"]
+        for i, o in enumerate(opts, 1): console.print(f"[bold]{i}.[/bold] {o}")
+        c = console.input("\nChoice: ").strip()
+        if c == "1": show_conversion_readiness()
+        elif c == "2": prepare_single_conversion_screen()
+        elif c == "3": prepare_folder_conversion_screen()
+        elif c == "4": show_conversion_jobs()
+        elif c == "5": execute_conversion_screen()
+        elif c == "6": return
+
+def show_conversion_readiness():
+    sample = console.input("Optional .model path to test decoder (Enter to skip): ").strip().strip('\"')
+    ready = conversion_readiness(sample or None)
+    t = Table(title="Model Conversion Readiness", header_style="bold cyan")
+    t.add_column("Item"); t.add_column("Status")
+    t.add_row("Blender", "FOUND" if ready.blender_found else "Not found")
+    t.add_row("Blender Path", ready.blender_path or "-")
+    t.add_row("Native Geometry Decoder", "AVAILABLE" if ready.geometry_decoder_available else "Not yet available")
+    t.add_row("Decoder", ready.geometry_decoder_name)
+    t.add_row("Target Formats", ", ".join(ready.supported_outputs)); console.print(t)
+    for note in ready.notes: console.print(f"[yellow]- {note}[/yellow]")
+    pause()
+
+def _ask_conversion_format(default="blend"):
+    return console.input(f"Output format [blend/obj/gltf/glb] (default {default}): ").strip().lower() or default
+
+def prepare_single_conversion_screen():
+    path = console.input("Full path to .model: ").strip().strip('\"')
+    if not path: return
+    try:
+        job = prepare_conversion_job(path, _ask_conversion_format())
+        t = Table(title="Conversion Job Prepared", header_style="bold cyan"); t.add_column("Field"); t.add_column("Value")
+        for key in ("source_model", "relative_path", "output_format", "output_path", "status", "decoder", "blender_path"): t.add_row(key, str(getattr(job, key)))
+        t.add_row("Linked Textures", str(len(job.linked_textures))); console.print(t)
+        for note in job.notes: console.print(f"[yellow]- {note}[/yellow]")
+    except Exception as exc: console.print(f"[red]{type(exc).__name__}: {exc}[/red]")
+    pause()
+
+def prepare_folder_conversion_screen():
+    folder = console.input("Folder containing .model files: ").strip().strip('\"')
+    if not folder: return
+    fmt = _ask_conversion_format(); recursive = console.input("Include subfolders? (Y/n): ").strip().lower() != "n"
+    raw = console.input("Optional job limit (Enter = all): ").strip(); limit = int(raw) if raw.isdigit() else 0
+    try: show_dict("Conversion Jobs Prepared", prepare_folder_jobs(folder, fmt, recursive, limit))
+    except Exception as exc: console.print(f"[red]{type(exc).__name__}: {exc}[/red]"); pause()
+
+def show_conversion_jobs():
+    rows = conversion_jobs(100)
+    t = Table(title="Recent Conversion Jobs", header_style="bold cyan")
+    for col in ("#", "Status", "Format", "Decoder", "Model", "Output"): t.add_column(col)
+    for i, r in enumerate(rows, 1): t.add_row(str(i), r.get("status", ""), r.get("output_format", ""), r.get("decoder", ""), r.get("relative_path", ""), r.get("output_path", ""))
+    console.print(t); pause()
+
+def execute_conversion_screen():
+    path = console.input("Full path to .model: ").strip().strip('\"')
+    if not path: return
+    try: show_dict("Conversion Result", execute_conversion_job(prepare_conversion_job(path, _ask_conversion_format())))
+    except Exception as exc: console.print(f"[red]{type(exc).__name__}: {exc}[/red]"); pause()
 
 # ------------------------------------------------------------------
 # Knowledge

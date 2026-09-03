@@ -1,6 +1,10 @@
 # Changelog Addition
 
-## v2.7.2
+## v2.7.3
 
-- Fixed Texture Evidence Pairs crash by adding analysis-engine fallback helpers.
-- Full Analysis no longer depends on `Database.texture_evidence_candidate_groups()` existing.
+- Added Model Conversion Lab.
+- Added Blender executable detection.
+- Added single and batch conversion job preparation.
+- Added conversion job history.
+- Added Blender background conversion bridge.
+- Added geometry decoder interface and sidecar OBJ/GLTF/GLB test decoder.

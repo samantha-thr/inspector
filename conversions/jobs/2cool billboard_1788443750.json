@@ -1,0 +1,14 @@
+{
+  "source_model": "I:\\My Drive\\Personal\\therestuff\\2cool billboard\\2cool billboard.model",
+  "relative_path": "2cool billboard.model",
+  "output_format": "blend",
+  "output_path": "conversions\\output\\2cool billboard.blend",
+  "status": "waiting_for_geometry_decoder",
+  "decoder": "none",
+  "blender_path": "C:\\Program Files\\Blender Foundation\\Blender 4.5\\blender.exe",
+  "linked_textures": [],
+  "notes": [
+    "No native There.com .model geometry decoder is available yet."
+  ],
+  "created": 1788443750.2988636
+}
