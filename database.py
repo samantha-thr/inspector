@@ -120,6 +120,50 @@ class Database:
             id INTEGER PRIMARY KEY AUTOINCREMENT, started REAL, finished REAL, root TEXT,
             found INTEGER, scanned INTEGER, skipped INTEGER, errors INTEGER, elapsed REAL, scan_type TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS knowledge_rules(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rule_type TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            confidence INTEGER DEFAULT 100,
+            source TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            created REAL,
+            updated REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS asset_reviews(
+            asset_path TEXT PRIMARY KEY,
+            status TEXT DEFAULT 'new',
+            priority TEXT DEFAULT 'normal',
+            reviewer TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            updated REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS asset_tags(
+            asset_path TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            created REAL,
+            PRIMARY KEY(asset_path, tag)
+        );
+
+        CREATE TABLE IF NOT EXISTS asset_notes(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_path TEXT NOT NULL,
+            note TEXT NOT NULL,
+            created REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS analysis_runs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_type TEXT,
+            started REAL,
+            finished REAL,
+            status TEXT,
+            summary TEXT
+        );
         """)
 
         # Migrations for existing v2 databases.
@@ -162,6 +206,12 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_texture_evidence_a ON texture_evidence_pairs(texture_a);
         CREATE INDEX IF NOT EXISTS idx_texture_evidence_b ON texture_evidence_pairs(texture_b);
         CREATE INDEX IF NOT EXISTS idx_texture_evidence_type ON texture_evidence_pairs(evidence_type);
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_rules_type_key ON knowledge_rules(rule_type, key);
+        CREATE INDEX IF NOT EXISTS idx_asset_reviews_status ON asset_reviews(status);
+        CREATE INDEX IF NOT EXISTS idx_asset_tags_tag ON asset_tags(tag);
+        CREATE INDEX IF NOT EXISTS idx_asset_notes_asset ON asset_notes(asset_path);
+        CREATE INDEX IF NOT EXISTS idx_analysis_runs_status ON analysis_runs(status);
         """)
         self.set_setting("schema_version", str(SCHEMA_VERSION))
         self.commit()
@@ -353,21 +403,128 @@ class Database:
             FROM texture_evidence_pairs e JOIN textures a ON a.path=e.texture_a JOIN textures b ON b.path=e.texture_b
             WHERE texture_a=? OR texture_b=? ORDER BY overall_score DESC LIMIT ?""", (texture_path, texture_path, limit)).fetchall()
 
-    def ensure_analysis_runs_table(self):
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS analysis_runs(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_type TEXT,
-                started REAL,
-                finished REAL,
-                status TEXT,
-                summary TEXT
-            )
-        """)
+    # ------------------------------------------------------------------
+    # 2.7 platform / investigation helpers
+    # ------------------------------------------------------------------
+
+    def texture_evidence_candidate_groups(self):
+        """Return candidate texture groups directly from texture fingerprints."""
+        groups = []
+        for method, expr, confidence in [
+            ("exact_sha256", "sha256", 100),
+            ("perceptual_ahash", "ahash", 80),
+            ("color_histogram", "histogram_hash", 70),
+        ]:
+            rows = self.db.execute(f"""
+                SELECT {expr} key_value, COUNT(*) count
+                FROM textures
+                WHERE {expr} IS NOT NULL AND {expr} != ''
+                GROUP BY key_value
+                HAVING COUNT(*) > 1
+                ORDER BY count DESC
+            """).fetchall()
+            for row in rows:
+                groups.append({
+                    "method": method,
+                    "expr": expr,
+                    "key_value": row["key_value"],
+                    "count": row["count"],
+                    "confidence": confidence,
+                })
+        return groups
+
+    def texture_members_for_group(self, expr, key, limit=500):
+        return self.db.execute(
+            f"SELECT * FROM textures WHERE {expr}=? ORDER BY folder,filename LIMIT ?",
+            (key, limit),
+        ).fetchall()
+
+    def set_asset_review(self, asset_path, status="new", priority="normal", reviewer="", notes=""):
+        self.db.execute(
+            "INSERT OR REPLACE INTO asset_reviews(asset_path,status,priority,reviewer,notes,updated) VALUES(?,?,?,?,?,?)",
+            (asset_path, status, priority, reviewer, notes, time.time()),
+        )
         self.commit()
 
+    def get_asset_review(self, asset_path):
+        return self.db.execute(
+            "SELECT * FROM asset_reviews WHERE asset_path=?",
+            (asset_path,),
+        ).fetchone()
+
+    def add_asset_tag(self, asset_path, tag):
+        tag = tag.strip().lower()
+        if not tag:
+            return
+        self.db.execute(
+            "INSERT OR IGNORE INTO asset_tags(asset_path,tag,created) VALUES(?,?,?)",
+            (asset_path, tag, time.time()),
+        )
+        self.commit()
+
+    def remove_asset_tag(self, asset_path, tag):
+        self.db.execute(
+            "DELETE FROM asset_tags WHERE asset_path=? AND tag=?",
+            (asset_path, tag.strip().lower()),
+        )
+        self.commit()
+
+    def tags_for_asset(self, asset_path):
+        return [
+            r["tag"]
+            for r in self.db.execute(
+                "SELECT tag FROM asset_tags WHERE asset_path=? ORDER BY tag",
+                (asset_path,),
+            ).fetchall()
+        ]
+
+    def add_asset_note(self, asset_path, note):
+        note = note.strip()
+        if not note:
+            return
+        self.db.execute(
+            "INSERT INTO asset_notes(asset_path,note,created) VALUES(?,?,?)",
+            (asset_path, note, time.time()),
+        )
+        self.commit()
+
+    def notes_for_asset(self, asset_path, limit=25):
+        return self.db.execute(
+            "SELECT * FROM asset_notes WHERE asset_path=? ORDER BY created DESC LIMIT ?",
+            (asset_path, limit),
+        ).fetchall()
+
+    def upsert_knowledge_rule(self, rule_type, key, value, confidence=100, source="", notes=""):
+        now = time.time()
+        existing = self.db.execute(
+            "SELECT id FROM knowledge_rules WHERE rule_type=? AND key=? AND value=?",
+            (rule_type, key, value),
+        ).fetchone()
+
+        if existing:
+            self.db.execute(
+                "UPDATE knowledge_rules SET confidence=?,source=?,notes=?,updated=? WHERE id=?",
+                (confidence, source, notes, now, existing["id"]),
+            )
+        else:
+            self.db.execute(
+                "INSERT INTO knowledge_rules(rule_type,key,value,confidence,source,notes,created,updated) VALUES(?,?,?,?,?,?,?,?)",
+                (rule_type, key, value, confidence, source, notes, now, now),
+            )
+        self.commit()
+
+    def knowledge_rules(self, rule_type=None, limit=250):
+        if rule_type:
+            return self.db.execute(
+                "SELECT * FROM knowledge_rules WHERE rule_type=? ORDER BY key,value LIMIT ?",
+                (rule_type, limit),
+            ).fetchall()
+        return self.db.execute(
+            "SELECT * FROM knowledge_rules ORDER BY rule_type,key,value LIMIT ?",
+            (limit,),
+        ).fetchall()
+
     def begin_analysis_run(self, run_type):
-        self.ensure_analysis_runs_table()
         now = time.time()
         self.db.execute(
             "INSERT INTO analysis_runs(run_type,started,finished,status,summary) VALUES(?,?,?,?,?)",
@@ -377,16 +534,15 @@ class Database:
         return int(self.db.execute("SELECT last_insert_rowid()").fetchone()[0])
 
     def finish_analysis_run(self, run_id, status="complete", summary=""):
-        self.ensure_analysis_runs_table()
         self.db.execute(
-            "UPDATE analysis_runs SET finished=?, status=?, summary=? WHERE id=?",
+            "UPDATE analysis_runs SET finished=?,status=?,summary=? WHERE id=?",
             (time.time(), status, summary, run_id),
         )
         self.commit()
 
     def recent_analysis_runs(self, limit=20):
-        self.ensure_analysis_runs_table()
         return self.db.execute(
             "SELECT * FROM analysis_runs ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
+

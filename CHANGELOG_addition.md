@@ -1,9 +1,8 @@
 # Changelog Addition
 
-## v2.7.5
+## v2.7.6
 
-- Fixed duplicate-looking LOD objects by consolidating model components into one OBJ/Blender object per actual LOD.
-- Fixed 90-degree face-down Blender conversions by explicitly importing decoded geometry as Y-forward / Z-up.
-- Added `master` parent object to converted Blender scenes.
-- Added LOD distance custom properties to `master` and LOD objects.
-- Improved OBJ naming and conversion metadata.
+- Restored missing 2.7 platform database tables.
+- Fixed `asset_reviews` missing-table crash.
+- Restored review, tag, note, knowledge, analysis-run, and texture-evidence helpers.
+- Existing analysis data is preserved.
