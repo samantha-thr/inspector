@@ -1,0 +1,68 @@
+{
+  "podium.model": {
+    "inspect": {
+      "path": "/mnt/data/podium.model",
+      "version": 10,
+      "materials": 1,
+      "nodes": 2,
+      "lods": 3,
+      "meshes": 3,
+      "vertices": 432,
+      "triangles": 216,
+      "collision_vertices": 48,
+      "collision_polygons": 36,
+      "lod_distances": [
+        75.0,
+        200.0,
+        700.0
+      ],
+      "bytes_consumed": 7109,
+      "file_size": 7109
+    },
+    "export": {
+      "format": "obj",
+      "output": "/mnt/data/ThereInspector_v2_7_4_native_decoder_changed_files/_test_podium.obj",
+      "material_library": "/mnt/data/ThereInspector_v2_7_4_native_decoder_changed_files/_test_podium.mtl",
+      "lods": 3,
+      "meshes": 3,
+      "vertices": 432,
+      "triangles": 216,
+      "collision": true,
+      "materials": 1,
+      "nodes": 2
+    }
+  },
+  "m00_tuv.model": {
+    "inspect": {
+      "path": "/mnt/data/m00_tuv.model",
+      "version": 10,
+      "materials": 2,
+      "nodes": 16,
+      "lods": 3,
+      "meshes": 21,
+      "vertices": 2255,
+      "triangles": 2362,
+      "collision_vertices": 0,
+      "collision_polygons": 0,
+      "lod_distances": [
+        50.0,
+        120.0,
+        1800.0
+      ],
+      "bytes_consumed": 46125,
+      "file_size": 46125
+    },
+    "export": {
+      "format": "obj",
+      "output": "/mnt/data/ThereInspector_v2_7_4_native_decoder_changed_files/_test_m00_tuv.obj",
+      "material_library": "/mnt/data/ThereInspector_v2_7_4_native_decoder_changed_files/_test_m00_tuv.mtl",
+      "lods": 3,
+      "meshes": 21,
+      "vertices": 2255,
+      "triangles": 2362,
+      "collision": false,
+      "materials": 2,
+      "nodes": 16
+    }
+  }
+}

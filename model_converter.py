@@ -10,12 +10,14 @@ from pathlib import Path
 
 from config import DEFAULT_SCAN_PATH
 from database import Database
+from there_model_decoder import ThereModelDecodeError, decode_model, export_obj, inspect_model
 
 CONVERSION_DIR = Path("conversions")
 JOBS_DIR = CONVERSION_DIR / "jobs"
 OUTPUT_DIR = CONVERSION_DIR / "output"
 LOG_DIR = CONVERSION_DIR / "logs"
 SUPPORTED_OUTPUTS = ("obj", "gltf", "glb", "blend")
+
 
 @dataclass
 class ConversionJob:
@@ -30,6 +32,7 @@ class ConversionJob:
     notes: list[str] = field(default_factory=list)
     created: float = field(default_factory=time.time)
 
+
 @dataclass
 class ConversionReadiness:
     blender_found: bool
@@ -39,29 +42,35 @@ class ConversionReadiness:
     supported_outputs: tuple[str, ...]
     notes: list[str]
 
+
 def _ensure_dirs() -> None:
     for p in (CONVERSION_DIR, JOBS_DIR, OUTPUT_DIR, LOG_DIR):
         p.mkdir(parents=True, exist_ok=True)
+
 
 def find_blender() -> str:
     candidates: list[Path] = []
     env = os.environ.get("BLENDER_EXE")
     if env:
         candidates.append(Path(env))
+
     which = shutil.which("blender") or shutil.which("blender.exe")
     if which:
         candidates.append(Path(which))
+
     for base in [os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")]:
         if not base:
             continue
         root = Path(base) / "Blender Foundation"
         if root.exists():
             candidates.extend(root.glob("Blender */blender.exe"))
+
     candidates += [
         Path(r"C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"),
         Path(r"C:\Program Files\Blender Foundation\Blender 4.4\blender.exe"),
         Path(r"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe"),
     ]
+
     for candidate in candidates:
         try:
             if candidate.exists():
@@ -70,32 +79,64 @@ def find_blender() -> str:
             pass
     return ""
 
+
 class GeometryDecoder:
     name = "none"
+
     def can_decode(self, model_path: Path) -> bool:
         return False
-    def export_interchange(self, model_path: Path, output_path: Path, textures: list[Path]) -> dict:
+
+    def export_obj(self, model_path: Path, output_path: Path, textures: list[Path]) -> dict:
         raise NotImplementedError
+
+
+class NativeThereModelDecoder(GeometryDecoder):
+    name = "there_som_v10"
+
+    def can_decode(self, model_path: Path) -> bool:
+        try:
+            with model_path.open("rb") as f:
+                header = f.read(8)
+            return len(header) >= 8 and header[:4] == b"SOM " and int.from_bytes(header[4:8], "big") == 10
+        except OSError:
+            return False
+
+    def export_obj(self, model_path: Path, output_path: Path, textures: list[Path]) -> dict:
+        decoded = decode_model(model_path)
+        return export_obj(decoded, output_path, textures)
+
+    def inspect(self, model_path: Path) -> dict:
+        return inspect_model(model_path)
+
 
 class SidecarGeometryDecoder(GeometryDecoder):
     name = "sidecar_interchange"
+
     def find_sidecar(self, model_path: Path) -> Path | None:
-        for ext in (".glb", ".gltf", ".obj"):
+        for ext in (".obj", ".glb", ".gltf"):
             p = model_path.with_suffix(ext)
             if p.exists():
                 return p
         return None
+
     def can_decode(self, model_path: Path) -> bool:
         return self.find_sidecar(model_path) is not None
-    def export_interchange(self, model_path: Path, output_path: Path, textures: list[Path]) -> dict:
+
+    def export_obj(self, model_path: Path, output_path: Path, textures: list[Path]) -> dict:
         source = self.find_sidecar(model_path)
-        if not source:
-            raise RuntimeError("No matching OBJ/GLTF/GLB sidecar was found.")
+        if source is None or source.suffix.lower() != ".obj":
+            raise RuntimeError("Sidecar decoder requires an OBJ sidecar for direct OBJ conversion.")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, output_path)
-        return {"source": str(source), "interchange": str(output_path), "copied": True}
+        mtl = source.with_suffix(".mtl")
+        if mtl.exists():
+            shutil.copy2(mtl, output_path.with_suffix(".mtl"))
+        return {"source": str(source), "output": str(output_path), "copied": True}
 
-DECODERS: list[GeometryDecoder] = [SidecarGeometryDecoder()]
+
+# Native decoding is preferred over sidecars.
+DECODERS: list[GeometryDecoder] = [NativeThereModelDecoder(), SidecarGeometryDecoder()]
+
 
 def active_decoder(model_path: Path) -> GeometryDecoder | None:
     for decoder in DECODERS:
@@ -106,17 +147,29 @@ def active_decoder(model_path: Path) -> GeometryDecoder | None:
             continue
     return None
 
+
 def conversion_readiness(sample_model: str | Path | None = None) -> ConversionReadiness:
     blender = find_blender()
-    decoder = active_decoder(Path(sample_model)) if sample_model else None
+    decoder = active_decoder(Path(sample_model)) if sample_model else NativeThereModelDecoder()
+    notes = [
+        "Native SOM v10 geometry decoding is enabled.",
+        "OBJ can be generated directly without Blender.",
+        "BLEND / GLB / GLTF use Blender background mode after native OBJ reconstruction.",
+        "LOD meshes, UV0, normals, material groups, collision geometry, nodes and LOD distances are decoded.",
+        "Texture assignment is best-effort: Inspector-linked DDS files are preferred over embedded placeholder paths.",
+    ]
+    if not blender:
+        notes.append("Blender was not detected, so BLEND/GLB/GLTF conversion will be unavailable until Blender is installed or BLENDER_EXE is set.")
+
     return ConversionReadiness(
-        bool(blender), blender, decoder is not None, decoder.name if decoder else "none", SUPPORTED_OUTPUTS,
-        [
-            "Native There.com .model geometry decoding is not implemented yet.",
-            "2.7.3 installs the conversion pipeline and Blender bridge so a native decoder can plug in cleanly.",
-            "A same-name OBJ/GLTF/GLB sidecar can be used now to test the pipeline end-to-end.",
-        ],
+        blender_found=bool(blender),
+        blender_path=blender,
+        geometry_decoder_available=decoder is not None,
+        geometry_decoder_name=decoder.name if decoder else "none",
+        supported_outputs=SUPPORTED_OUTPUTS,
+        notes=notes,
     )
+
 
 def _linked_textures(model_path: Path) -> list[Path]:
     db = Database()
@@ -127,116 +180,242 @@ def _linked_textures(model_path: Path) -> list[Path]:
         result = []
         for link in db.links_for_model(row["path"], 500):
             if "texture_path" in link.keys() and link["texture_path"]:
-                result.append(Path(link["texture_path"]))
+                p = Path(link["texture_path"])
+                if p.exists():
+                    result.append(p)
         return result
     finally:
         db.close()
 
+
+def inspect_conversion_source(model_path: str | Path) -> dict:
+    model_path = Path(model_path).resolve()
+    decoder = active_decoder(model_path)
+    if decoder is None:
+        return {"success": False, "decoder": "none", "message": "No decoder supports this model."}
+
+    if isinstance(decoder, NativeThereModelDecoder):
+        try:
+            result = decoder.inspect(model_path)
+            result.update({"success": True, "decoder": decoder.name})
+            return result
+        except Exception as exc:
+            return {
+                "success": False,
+                "decoder": decoder.name,
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+
+    return {
+        "success": True,
+        "decoder": decoder.name,
+        "message": "Sidecar conversion source is available.",
+    }
+
+
 def prepare_conversion_job(model_path: str | Path, output_format: str = "blend") -> ConversionJob:
     _ensure_dirs()
     model_path = Path(model_path).resolve()
+
     if not model_path.exists():
         raise FileNotFoundError(model_path)
     if model_path.suffix.lower() != ".model":
         raise ValueError("Source must be a .model file")
+
     output_format = output_format.lower().lstrip(".")
     if output_format not in SUPPORTED_OUTPUTS:
         raise ValueError(f"Unsupported output format: {output_format}")
+
     try:
         rel = str(model_path.relative_to(Path(DEFAULT_SCAN_PATH)))
     except Exception:
         rel = model_path.name
+
     target = OUTPUT_DIR / Path(rel).parent / f"{model_path.stem}.{output_format}"
     decoder = active_decoder(model_path)
     blender = find_blender()
     notes = []
-    status = "prepared" if decoder else "waiting_for_geometry_decoder"
+
+    status = "prepared" if decoder else "unsupported_model"
     if not decoder:
-        notes.append("No native There.com .model geometry decoder is available yet.")
-    if output_format == "blend" and not blender:
+        notes.append("No available decoder supports this .model file.")
+
+    if output_format in ("blend", "gltf", "glb") and not blender:
+        status = "blender_not_found"
         notes.append("Blender executable was not found. Install Blender or set BLENDER_EXE.")
+
     job = ConversionJob(
-        source_model=str(model_path), relative_path=rel, output_format=output_format,
-        output_path=str(target), status=status, decoder=decoder.name if decoder else "none",
-        blender_path=blender, linked_textures=[str(x) for x in _linked_textures(model_path)], notes=notes,
+        source_model=str(model_path),
+        relative_path=rel,
+        output_format=output_format,
+        output_path=str(target),
+        status=status,
+        decoder=decoder.name if decoder else "none",
+        blender_path=blender,
+        linked_textures=[str(x) for x in _linked_textures(model_path)],
+        notes=notes,
     )
+
     job_file = JOBS_DIR / f"{model_path.stem}_{int(job.created)}.json"
     job_file.write_text(json.dumps(asdict(job), indent=2), encoding="utf-8")
     return job
 
-def prepare_folder_jobs(folder: str | Path, output_format: str = "blend", recursive: bool = True, limit: int = 0) -> dict:
+
+def prepare_folder_jobs(
+    folder: str | Path,
+    output_format: str = "blend",
+    recursive: bool = True,
+    limit: int = 0,
+) -> dict:
     folder = Path(folder)
     if not folder.exists():
         raise FileNotFoundError(folder)
+
     files = sorted(folder.rglob("*.model") if recursive else folder.glob("*.model"))
     if limit > 0:
         files = files[:limit]
-    prepared = waiting = errors = 0
+
+    prepared = unsupported = errors = 0
+
     for path in files:
         try:
             job = prepare_conversion_job(path, output_format)
             prepared += 1
-            waiting += int(job.status != "prepared")
+            unsupported += int(job.status == "unsupported_model")
         except Exception:
             errors += 1
-    return {"models_found": len(files), "jobs_prepared": prepared, "waiting_for_decoder": waiting, "errors": errors}
 
-def _write_blender_bridge_script(source_path: Path, output_blend: Path) -> Path:
+    return {
+        "models_found": len(files),
+        "jobs_prepared": prepared,
+        "unsupported_models": unsupported,
+        "errors": errors,
+    }
+
+
+def _write_blender_bridge_script(
+    source_obj: Path,
+    output_path: Path,
+    output_format: str,
+) -> Path:
     _ensure_dirs()
-    script = JOBS_DIR / f"blender_bridge_{int(time.time()*1000)}.py"
+    script = JOBS_DIR / f"blender_bridge_{int(time.time() * 1000)}.py"
+
     code = "\n".join([
         "import bpy",
         "from pathlib import Path",
-        f"source = Path({str(source_path)!r})",
-        f"out = Path({str(output_blend)!r})",
+        f"source = Path({str(source_obj)!r})",
+        f"out = Path({str(output_path)!r})",
+        f"fmt = {output_format!r}",
         "bpy.ops.object.select_all(action='SELECT')",
         "bpy.ops.object.delete(use_global=False)",
-        "ext = source.suffix.lower()",
-        "if ext == '.obj':",
-        "    try:",
-        "        bpy.ops.wm.obj_import(filepath=str(source))",
-        "    except Exception:",
-        "        bpy.ops.import_scene.obj(filepath=str(source))",
-        "elif ext in ('.gltf', '.glb'):",
-        "    bpy.ops.import_scene.gltf(filepath=str(source))",
-        "else:",
-        "    raise RuntimeError('Unsupported interchange format: ' + ext)",
+        "try:",
+        "    bpy.ops.wm.obj_import(filepath=str(source))",
+        "except Exception:",
+        "    bpy.ops.import_scene.obj(filepath=str(source))",
         "out.parent.mkdir(parents=True, exist_ok=True)",
-        "bpy.ops.wm.save_as_mainfile(filepath=str(out))",
+        "if fmt == 'blend':",
+        "    bpy.ops.wm.save_as_mainfile(filepath=str(out))",
+        "elif fmt == 'glb':",
+        "    bpy.ops.export_scene.gltf(filepath=str(out), export_format='GLB')",
+        "elif fmt == 'gltf':",
+        "    bpy.ops.export_scene.gltf(filepath=str(out), export_format='GLTF_SEPARATE')",
+        "else:",
+        "    raise RuntimeError('Unsupported Blender output format: ' + fmt)",
     ])
+
     script.write_text(code, encoding="utf-8")
     return script
 
+
 def execute_conversion_job(job: ConversionJob) -> dict:
+    _ensure_dirs()
     model_path = Path(job.source_model)
     decoder = active_decoder(model_path)
+
     if decoder is None:
-        return {"success": False, "status": "waiting_for_geometry_decoder", "message": "Native .model geometry decoding is not implemented yet."}
+        return {
+            "success": False,
+            "status": "unsupported_model",
+            "message": "No decoder supports this .model file.",
+        }
+
     target = Path(job.output_path)
-    textures = [Path(p) for p in job.linked_textures]
-    if job.output_format == "blend":
-        blender = job.blender_path or find_blender()
-        if not blender:
-            return {"success": False, "status": "blender_not_found", "message": "Blender executable not found."}
-        sidecar = decoder.find_sidecar(model_path) if isinstance(decoder, SidecarGeometryDecoder) else None
-        temp = target.with_suffix(sidecar.suffix.lower() if sidecar else ".obj")
-        decoder.export_interchange(model_path, temp, textures)
-        script = _write_blender_bridge_script(temp, target)
-        proc = subprocess.run([blender, "--background", "--python", str(script)], capture_output=True, text=True)
-        log = LOG_DIR / f"{model_path.stem}_{int(time.time())}.log"
-        log.write_text((proc.stdout or "") + "\n" + (proc.stderr or ""), encoding="utf-8")
-        return {"success": proc.returncode == 0 and target.exists(), "status": "complete" if proc.returncode == 0 and target.exists() else "blender_failed", "output": str(target), "log": str(log), "returncode": proc.returncode}
-    sidecar = decoder.find_sidecar(model_path) if isinstance(decoder, SidecarGeometryDecoder) else None
-    desired = "." + job.output_format
-    if sidecar and sidecar.suffix.lower() != desired:
-        return {"success": False, "status": "format_transcode_requires_blender", "message": f"Available source is {sidecar.suffix}; requested {desired}."}
-    decoder.export_interchange(model_path, target, textures)
-    return {"success": target.exists(), "status": "complete" if target.exists() else "failed", "output": str(target)}
+    target.parent.mkdir(parents=True, exist_ok=True)
+    textures = [Path(p) for p in job.linked_textures if Path(p).exists()]
+
+    # Direct OBJ path
+    if job.output_format == "obj":
+        try:
+            result = decoder.export_obj(model_path, target, textures)
+            return {
+                "success": target.exists(),
+                "status": "complete" if target.exists() else "failed",
+                "output": str(target),
+                "decoder": decoder.name,
+                **result,
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "status": "decode_failed",
+                "decoder": decoder.name,
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+
+    # BLEND / GLB / GLTF: decode to OBJ then let Blender transcode it.
+    blender = job.blender_path or find_blender()
+    if not blender:
+        return {
+            "success": False,
+            "status": "blender_not_found",
+            "message": "Blender executable not found.",
+        }
+
+    temp_obj = target.with_suffix(".decoder.obj")
+
+    try:
+        decode_result = decoder.export_obj(model_path, temp_obj, textures)
+    except Exception as exc:
+        return {
+            "success": False,
+            "status": "decode_failed",
+            "decoder": decoder.name,
+            "message": f"{type(exc).__name__}: {exc}",
+        }
+
+    script = _write_blender_bridge_script(temp_obj, target, job.output_format)
+    proc = subprocess.run(
+        [blender, "--background", "--python", str(script)],
+        capture_output=True,
+        text=True,
+    )
+
+    log = LOG_DIR / f"{model_path.stem}_{int(time.time())}.log"
+    log.write_text((proc.stdout or "") + "\n" + (proc.stderr or ""), encoding="utf-8")
+
+    success = proc.returncode == 0 and target.exists()
+
+    return {
+        "success": success,
+        "status": "complete" if success else "blender_failed",
+        "output": str(target),
+        "log": str(log),
+        "returncode": proc.returncode,
+        "decoder": decoder.name,
+        "decoded_obj": str(temp_obj),
+        **decode_result,
+    }
+
 
 def conversion_jobs(limit: int = 100) -> list[dict]:
     _ensure_dirs()
     rows = []
-    for p in sorted(JOBS_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:limit]:
+    for p in sorted(
+        JOBS_DIR.glob("*.json"),
+        key=lambda x: x.stat().st_mtime,
+        reverse=True,
+    )[:limit]:
         try:
             row = json.loads(p.read_text(encoding="utf-8"))
             row["job_file"] = str(p)
