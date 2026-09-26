@@ -9,11 +9,15 @@ pip install -r requirements.txt
 python there_inspector_gui.py
 ```
 
-## Current 3.0-dev5 capabilities
+## Current 3.0-dev6 capabilities
 
 - live dashboard with model, texture, evidence, review and last-scan information
 - scalable model/texture browsing with SQL paging, sorting and 250–5000 row page sizes
 - visual texture previews, including DDS through Pillow when supported
+- automatic cached Blender LOD0 model renders with transparent backgrounds
+- Visual Library workspace for batch-generating and browsing model thumbnails
+- live selected-asset preview panes in Models and Textures
+- cached model imagery reused in Models, Compare and Asset Profiles
 - model Asset Profiles with linked-texture visual galleries
 - Overview, Relationships, Evidence and Review tabs
 - review status, priority, tags and investigation notes
