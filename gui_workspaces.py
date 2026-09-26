@@ -78,8 +78,7 @@ class AssetDialog(QDialog):
             cached=cached_thumbnail(row["path"])
             if cached:
                 pix=QPixmap(str(cached)); self.model_preview.setPixmap(pix.scaled(700,420,Qt.KeepAspectRatio,Qt.SmoothTransformation))
-            else:self.model_preview.setText("No cached model render yet.
-Generate a LOD0 thumbnail to create one.")
+            else:self.model_preview.setText("No cached model render yet. Generate a LOD0 thumbnail to create one.")
             mv.addWidget(self.model_preview,1); mr=QHBoxLayout(); render=QPushButton("Generate / Refresh Model Render"); render.clicked.connect(lambda:self.render_model(row))
             mr.addStretch();mr.addWidget(render);mr.addStretch();mv.addLayout(mr);tabs.addTab(model_visual,"Model Render")
             for link in db.links_for_model(row["path"],24):
