@@ -6,6 +6,7 @@ from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import *
 from config import APP_NAME, DATABASE_PATH, DEFAULT_SCAN_PATH
 from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_conversion_job, inspect_conversion_source, prepare_conversion_job
+from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -60,6 +61,14 @@ class AssetDialog(QDialog):
         if kind=="texture":
             visual_items=[{"path":row["path"],"title":row["filename"],"subtitle":f"{row['width'] or row['dds_width'] or 0} × {row['height'] or row['dds_height'] or 0}"}]
         else:
+            model_visual=QWidget(); mv=QVBoxLayout(model_visual); self.model_preview=QLabel(); self.model_preview.setAlignment(Qt.AlignCenter); self.model_preview.setMinimumHeight(420)
+            cached=cached_thumbnail(row["path"])
+            if cached:
+                pix=QPixmap(str(cached)); self.model_preview.setPixmap(pix.scaled(700,420,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+            else:self.model_preview.setText("No cached model render yet.
+Generate a LOD0 thumbnail to create one.")
+            mv.addWidget(self.model_preview,1); mr=QHBoxLayout(); render=QPushButton("Generate / Refresh Model Render"); render.clicked.connect(lambda:self.render_model(row))
+            mr.addStretch();mr.addWidget(render);mr.addStretch();mv.addLayout(mr);tabs.addTab(model_visual,"Model Render")
             for link in db.links_for_model(row["path"],24):
                 visual_items.append({"path":link["texture_path"],"title":Path(link["texture_path"]).name,"subtitle":f"Link score {link['score']}"})
         tabs.addTab(texture_gallery(visual_items),"Visual")
@@ -91,6 +100,16 @@ class AssetDialog(QDialog):
         vb.addWidget(hist,1);save=QPushButton("Save Review");save.clicked.connect(lambda:self.save(row["path"]));vb.addWidget(save);tabs.addTab(review,"Review")
         actions=QHBoxLayout(); show=QPushButton("Show File in Explorer"); show.clicked.connect(lambda:reveal(row["path"])); actions.addWidget(show); actions.addStretch()
         close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(self.reject);actions.addWidget(close);box.addLayout(actions)
+    def render_model(self,row):
+        links=self.db.links_for_model(row["path"],100); textures=[x["texture_path"] for x in links if x["texture_path"]]
+        self.model_preview.setText("Rendering LOD0 in Blender…"); QApplication.processEvents()
+        self.render_task=Task(render_model_thumbnail,row["path"],textures,512,True)
+        self.render_task.done.connect(self.render_finished); self.render_task.failed.connect(lambda e:QMessageBox.critical(self,APP_NAME,e)); self.render_task.start()
+    def render_finished(self,result):
+        if result.get("success"):
+            pix=QPixmap(result["output"]); self.model_preview.setPixmap(pix.scaled(700,420,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        else:
+            self.model_preview.setText("Render failed."); QMessageBox.warning(self,APP_NAME,result.get("message") or result.get("log","Unknown render error")[-1500:])
     def save(self,path):
         self.db.set_asset_review(path,self.status.currentText(),self.priority.currentText())
         old=set(self.db.tags_for_asset(path));new={x.strip().lower() for x in self.tags.text().split(",") if x.strip()}
@@ -161,12 +180,14 @@ class KnowledgePage(QWidget):
 
 class SettingsPage(QWidget):
     def __init__(self,db=None):
-        super().__init__();self.db=db;self.settings=QSettings("ThereInspector","ThereInspector");b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Settings");h.setObjectName("title");b.addWidget(h);f=QFormLayout();self.resource=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH));self.blender=QLineEdit(self.settings.value("blender_path",""));f.addRow("Resource folder",self.resource);f.addRow("Blender executable",self.blender);f.addRow("Database",QLabel(str(DATABASE_PATH)));b.addLayout(f);buttons=QHBoxLayout();save=QPushButton("Save Settings");save.clicked.connect(self.save);export=QPushButton("Export Diagnostic Snapshot");export.clicked.connect(self.export_snapshot);buttons.addWidget(save);buttons.addWidget(export);buttons.addStretch();b.addLayout(buttons);b.addStretch()
+        super().__init__();self.db=db;self.settings=QSettings("ThereInspector","ThereInspector");b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Settings");h.setObjectName("title");b.addWidget(h);f=QFormLayout();self.resource=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH));self.blender=QLineEdit(self.settings.value("blender_path",""));f.addRow("Resource folder",self.resource);f.addRow("Blender executable",self.blender);f.addRow("Database",QLabel(str(DATABASE_PATH)));b.addLayout(f);buttons=QHBoxLayout();save=QPushButton("Save Settings");save.clicked.connect(self.save);export=QPushButton("Export Diagnostic Snapshot");export.clicked.connect(self.export_snapshot);clear=QPushButton("Clear Model Thumbnail Cache");clear.clicked.connect(self.clear_cache);buttons.addWidget(save);buttons.addWidget(export);buttons.addWidget(clear);buttons.addStretch();b.addLayout(buttons);b.addStretch()
     def save(self):
         self.settings.setValue("resource_path",self.resource.text());self.settings.setValue("blender_path",self.blender.text())
         if self.blender.text().strip():os.environ["BLENDER_EXE"]=self.blender.text().strip()
         QMessageBox.information(self,APP_NAME,"Settings saved.")
 
+    def clear_cache(self):
+        n=purge_thumbnail_cache(); QMessageBox.information(self,APP_NAME,f"Removed {n:,} cached model thumbnails.")
     def export_snapshot(self):
         if not self.db:return
         path,_=QFileDialog.getSaveFileName(self,"Export diagnostic snapshot","inspector_diagnostic.json","JSON (*.json)")
