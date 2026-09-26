@@ -1,6 +1,7 @@
 from __future__ import annotations
 import sys
-from PySide6.QtCore import QThread, Signal
+import time
+from PySide6.QtCore import QThread, Signal, QTimer
 from PySide6.QtWidgets import *
 from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
 from scanner import scan_folder, scan_textures
@@ -74,68 +75,101 @@ class Evidence(Page):
                 self.table.setItem(r,c,QTableWidgetItem(str(v or "")))
 
 class Worker(QThread):
-    progress = Signal(dict)
-    finished_ok = Signal(object)
-    failed = Signal(str)
-
-    def __init__(self, fn, *args):
-        super().__init__(); self.fn=fn; self.args=args
-
+    progress=Signal(dict); finished_ok=Signal(object); failed=Signal(str)
+    def __init__(self,fn,*args,**kwargs):
+        super().__init__(); self.fn=fn; self.args=args; self.kwargs=kwargs
     def run(self):
         try:
-            names = self.fn.__code__.co_varnames
-            kw = {}
-            if "progress_callback" in names: kw["progress_callback"] = self.progress.emit
-            elif "callback" in names: kw["callback"] = self.progress.emit
-            self.finished_ok.emit(self.fn(*self.args, **kw))
-        except Exception as exc:
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
+            names=self.fn.__code__.co_varnames; kw=dict(self.kwargs)
+            if "progress_callback" in names: kw["progress_callback"]=self.progress.emit
+            elif "callback" in names: kw["callback"]=self.progress.emit
+            self.finished_ok.emit(self.fn(*self.args,**kw))
+        except Exception as exc: self.failed.emit(f"{type(exc).__name__}: {exc}")
 
 class Analysis(Page):
-    def __init__(self, changed):
+    def __init__(self,changed):
         super().__init__("Scan & Analysis","Run scans and rebuild Inspector intelligence without the command line")
-        self.changed=changed; self.worker=None
-        row=QHBoxLayout(); self.root=QLineEdit(DEFAULT_SCAN_PATH)
-        browse=QPushButton("Browse"); browse.clicked.connect(self.browse)
+        self.changed=changed; self.worker=None; self.started_at=0.0; self.sequence=[]; self.sequence_index=0; self.sequence_name=""
+        row=QHBoxLayout(); self.root=QLineEdit(DEFAULT_SCAN_PATH); browse=QPushButton("Browse"); browse.clicked.connect(self.browse)
         row.addWidget(QLabel("Resources")); row.addWidget(self.root,1); row.addWidget(browse); self.box.addLayout(row)
-        grid=QGridLayout()
-        jobs=[
-            ("Scan Models", lambda:self.start(scan_folder,self.root.text())),
-            ("Scan Textures", lambda:self.start(scan_textures,self.root.text())),
-            ("Rebuild Links", lambda:self.start(rebuild_links)),
-            ("Model Families", lambda:self.start(rebuild_families)),
-            ("Texture Families", lambda:self.start(rebuild_texture_families)),
-            ("Model Evidence", lambda:self.start(rebuild_evidence)),
-            ("Texture Evidence", lambda:self.start(rebuild_texture_evidence)),
-        ]
+
+        card=QFrame(); card.setObjectName("card"); cb=QVBoxLayout(card)
+        t=QLabel("COMPLETE ASSET SCAN"); t.setObjectName("muted"); cb.addWidget(t)
+        d=QLabel("Scan models and textures, then rebuild links, families and evidence in one operation."); d.setWordWrap(True); d.setObjectName("muted"); cb.addWidget(d)
+        buttons=QHBoxLayout()
+        inc=QPushButton("Run Incremental Scan"); inc.clicked.connect(lambda:self.run_complete(False))
+        full=QPushButton("Run Full Scan"); full.clicked.connect(lambda:self.run_complete(True))
+        buttons.addWidget(inc); buttons.addWidget(full); cb.addLayout(buttons); self.box.addWidget(card)
+
+        advanced=QGroupBox("Individual / Advanced Jobs"); grid=QGridLayout(advanced)
+        jobs=[("Scan Models",lambda:self.start(scan_folder,self.root.text())),("Scan Textures",lambda:self.start(scan_textures,self.root.text())),
+              ("Rebuild Links",lambda:self.start(rebuild_links)),("Model Families",lambda:self.start(rebuild_families)),
+              ("Texture Families",lambda:self.start(rebuild_texture_families)),("Model Evidence",lambda:self.start(rebuild_evidence)),
+              ("Texture Evidence",lambda:self.start(rebuild_texture_evidence))]
         for i,(label,fn) in enumerate(jobs):
             b=QPushButton(label); b.clicked.connect(fn); grid.addWidget(b,i//3,i%3)
-        self.box.addLayout(grid)
-        self.progress=QProgressBar(); self.progress.setRange(0,100); self.box.addWidget(self.progress)
+        self.box.addWidget(advanced)
+
+        self.job_label=QLabel("Ready"); self.job_label.setObjectName("muted"); self.box.addWidget(self.job_label)
+        self.progress=QProgressBar(); self.progress.setRange(0,100); self.progress.setFormat("%p%"); self.box.addWidget(self.progress)
+        stats=QHBoxLayout(); self.percent_label=QLabel("0.0%"); self.elapsed_label=QLabel("Elapsed: 00:00"); self.eta_label=QLabel("Remaining: --:--")
+        for x in (self.percent_label,self.elapsed_label,self.eta_label): x.setObjectName("muted"); stats.addWidget(x)
+        stats.addStretch(); self.box.addLayout(stats)
         self.status=QLabel("Ready"); self.status.setObjectName("muted"); self.box.addWidget(self.status); self.box.addStretch()
+        self.timer=QTimer(self); self.timer.setInterval(1000); self.timer.timeout.connect(self.refresh_clock)
+
+    @staticmethod
+    def fmt(seconds):
+        if seconds is None or seconds<0:return "--:--"
+        seconds=int(seconds); h,rem=divmod(seconds,3600); m,s=divmod(rem,60)
+        return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
     def browse(self):
         p=QFileDialog.getExistingDirectory(self,"There resource folder",self.root.text())
-        if p: self.root.setText(p)
+        if p:self.root.setText(p)
 
-    def start(self,fn,*args):
-        if self.worker and self.worker.isRunning():
-            QMessageBox.information(self,APP_NAME,"A job is already running."); return
-        self.progress.setValue(0); self.status.setText(f"Running {fn.__name__}...")
-        self.worker=Worker(fn,*args); self.worker.progress.connect(self.update_progress)
-        self.worker.finished_ok.connect(self.done); self.worker.failed.connect(self.fail); self.worker.start()
+    def run_complete(self,full):
+        if self.worker and self.worker.isRunning(): QMessageBox.information(self,APP_NAME,"A job is already running."); return
+        root=self.root.text(); self.sequence_name="Full Scan" if full else "Incremental Scan"
+        self.sequence=[("Models",scan_folder,(root,),{"full_rescan":full}),("Textures",scan_textures,(root,),{"full_rescan":full}),
+                       ("Links",rebuild_links,(),{}),("Model Families",rebuild_families,(),{}),("Texture Families",rebuild_texture_families,(),{}),
+                       ("Model Evidence",rebuild_evidence,(),{}),("Texture Evidence",rebuild_texture_evidence,(),{})]
+        self.sequence_index=0; self.start_sequence()
+
+    def start_sequence(self):
+        if self.sequence_index>=len(self.sequence):
+            self.progress.setValue(100); self.percent_label.setText("100.0%"); self.job_label.setText(self.sequence_name+" complete")
+            self.status.setText("All scan and analysis stages completed."); self.timer.stop(); self.changed(); self.sequence=[]; return
+        label,fn,args,kwargs=self.sequence[self.sequence_index]; self.start(fn,*args,_sequence=True,_label=label,**kwargs)
+
+    def start(self,fn,*args,_sequence=False,_label=None,**kwargs):
+        if self.worker and self.worker.isRunning(): QMessageBox.information(self,APP_NAME,"A job is already running."); return
+        self.started_at=time.time(); self.timer.start(); self.progress.setValue(0); self.percent_label.setText("0.0%")
+        self.elapsed_label.setText("Elapsed: 00:00"); self.eta_label.setText("Remaining: --:--")
+        self.job_label.setText((self.sequence_name+" • " if _sequence else "")+(_label or fn.__name__)); self.status.setText("Starting...")
+        self.worker=Worker(fn,*args,**kwargs); self.worker.progress.connect(self.update_progress)
+        self.worker.finished_ok.connect(self.sequence_done if _sequence else self.done); self.worker.failed.connect(self.fail); self.worker.start()
 
     def update_progress(self,d):
-        total=int(d.get("total",0) or 0); idx=int(d.get("index",0) or 0)
-        if total: self.progress.setValue(min(100,int(idx*100/total)))
-        name=d.get("relative_path") or d.get("file") or d.get("method") or ""
-        self.status.setText(f"{idx:,} / {total:,}  {name}")
+        total=int(d.get("total",0) or 0); idx=int(d.get("index",0) or 0); pct=(idx*100.0/total) if total else 0.0
+        self.progress.setValue(min(100,int(pct))); self.percent_label.setText(f"{pct:.1f}%")
+        elapsed=max(time.time()-self.started_at,.001); eta=(elapsed/idx*(total-idx)) if idx and total else None
+        self.elapsed_label.setText("Elapsed: "+self.fmt(elapsed)); self.eta_label.setText("Remaining: "+self.fmt(eta))
+        name=d.get("relative_path") or d.get("file") or d.get("method") or d.get("status") or ""; speed=idx/elapsed if idx else 0
+        self.status.setText(f"{idx:,} / {total:,}   {name}   •   {speed:,.1f}/sec")
+
+    def refresh_clock(self):
+        if self.started_at:self.elapsed_label.setText("Elapsed: "+self.fmt(time.time()-self.started_at))
+
+    def sequence_done(self,result):
+        self.progress.setValue(100); self.percent_label.setText("100.0%"); self.sequence_index+=1; self.start_sequence()
 
     def done(self,result):
-        self.progress.setValue(100); self.status.setText("Complete"); self.changed()
+        self.progress.setValue(100); self.percent_label.setText("100.0%"); self.timer.stop(); self.status.setText("Complete")
+        self.elapsed_label.setText("Elapsed: "+self.fmt(time.time()-self.started_at)); self.eta_label.setText("Remaining: 00:00"); self.changed()
 
     def fail(self,error):
-        self.status.setText(error); QMessageBox.critical(self,"Job failed",error)
+        self.timer.stop(); self.sequence=[]; self.status.setText(error); QMessageBox.critical(self,"Job failed",error)
 
 class Placeholder(Page):
     def __init__(self,title,subtitle):
