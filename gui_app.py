@@ -1,6 +1,7 @@
 from __future__ import annotations
 import sys
 import time
+from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSettings
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import *
