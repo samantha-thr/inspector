@@ -20,6 +20,19 @@ def texture_pixmap(path, max_w=560, max_h=440):
         if not pix.isNull(): return pix.scaled(max_w,max_h,Qt.KeepAspectRatio,Qt.SmoothTransformation)
     return QPixmap()
 
+def texture_diff_pixmap(path_a,path_b,max_w=900,max_h=220):
+    try:
+        from PIL import Image, ImageChops, ImageEnhance, ImageStat
+        a=Image.open(path_a).convert("RGBA"); b=Image.open(path_b).convert("RGBA")
+        if a.size!=b.size:b=b.resize(a.size,Image.Resampling.LANCZOS)
+        diff=ImageChops.difference(a,b)
+        stat=ImageStat.Stat(diff.convert("RGB")); mean=sum(stat.mean)/3.0
+        similarity=max(0.0,100.0*(1.0-mean/255.0))
+        shown=ImageEnhance.Contrast(diff).enhance(2.0)
+        data=shown.tobytes("raw","RGBA");q=QImage(data,shown.width,shown.height,QImage.Format_RGBA8888).copy()
+        return QPixmap.fromImage(q).scaled(max_w,max_h,Qt.KeepAspectRatio,Qt.SmoothTransformation),similarity
+    except Exception:return QPixmap(),None
+
 def reveal(p):
     try: subprocess.Popen(["explorer","/select,",str(Path(p))]) if os.name=="nt" else None
     except Exception: pass
@@ -184,6 +197,9 @@ class ComparePage(QWidget):
             pa=texture_pixmap(a["path"],520,250); pb=texture_pixmap(bb["path"],520,250)
             self.left_preview.setPixmap(pa) if not pa.isNull() else self.left_preview.setText("Preview unavailable")
             self.right_preview.setPixmap(pb) if not pb.isNull() else self.right_preview.setText("Preview unavailable")
+            dp,sim=texture_diff_pixmap(a["path"],bb["path"])
+            if not dp.isNull():self.diff_preview.setPixmap(dp);self.diff_preview.setToolTip(f"Mean pixel similarity: {sim:.2f}%")
+            else:self.diff_preview.setText("Difference preview unavailable")
         else:
             for label,row in ((self.left_preview,a),(self.right_preview,bb)):
                 p=cached_thumbnail(row["path"],512)
