@@ -9,7 +9,7 @@ from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
 from scanner import scan_folder, scan_textures
 from analysis_engine import rebuild_links, rebuild_families, rebuild_texture_families, rebuild_evidence, rebuild_texture_evidence
 from database import Database
-from gui_workspaces import AssetDialog, ComparePage, ConvertPage, KnowledgePage, SettingsPage, texture_pixmap
+from gui_workspaces import AssetDialog, ComparePage, ConvertPage, KnowledgePage, SettingsPage, ThumbnailStudio, texture_pixmap
 from model_thumbnail import cached_thumbnail
 
 BG="#101215"; PANEL="#181b20"; CYAN="#43e8e8"; TEXT="#e8eaed"; MUTED="#8f98a3"
@@ -271,12 +271,12 @@ class MainWindow(QMainWindow):
         brand=QLabel("THERE" + chr(10) + "INSPECTOR"); brand.setObjectName("brand"); sb.addWidget(brand)
         sub=QLabel("Asset Intelligence Suite"); sub.setObjectName("muted"); sb.addWidget(sub); sb.addSpacing(20)
         self.nav=QListWidget(); self.nav.setObjectName("nav")
-        names=["Dashboard","Models","Textures","Evidence","Review Queue","Compare","Convert","Knowledge","Scan & Analysis","Settings"]
+        names=["Dashboard","Models","Textures","Visual Library","Evidence","Review Queue","Compare","Convert","Knowledge","Scan & Analysis","Settings"]
         self.nav.addItems(names); self.nav.setCurrentRow(0); sb.addWidget(self.nav,1)
         db_label=QLabel("Database" + chr(10) + str(DATABASE_PATH)); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
         sb.addWidget(db_label); shell.addWidget(side)
         self.stack=QStackedWidget()
-        pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),ReviewQueue(self.db),
+        pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),ThumbnailStudio(self.db),Evidence(self.db),ReviewQueue(self.db),
                ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),SettingsPage(self.db)]
         for p in pages:self.stack.addWidget(p)
         shell.addWidget(self.stack,1); self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
