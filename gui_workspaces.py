@@ -136,8 +136,11 @@ class ComparePage(QWidget):
             self.left_preview.setPixmap(pa) if not pa.isNull() else self.left_preview.setText("Preview unavailable")
             self.right_preview.setPixmap(pb) if not pb.isNull() else self.right_preview.setText("Preview unavailable")
         else:
-            self.left_preview.setText("Model visual preview: linked textures available from Asset Profile")
-            self.right_preview.setText("Model visual preview: linked textures available from Asset Profile")
+            for label,row in ((self.left_preview,a),(self.right_preview,bb)):
+                p=cached_thumbnail(row["path"],512)
+                if p:
+                    pix=QPixmap(str(p));label.setPixmap(pix.scaled(520,250,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+                else:label.setText("No cached model render.\nOpen Asset Profile → Model Render to generate.")
         keys=["filename","folder","size","sha256"]+(["som_version","string_fingerprint","prefix_4k_sha256","middle_4k_sha256","suffix_4k_sha256"] if model else ["width","height","dds_format","ahash","histogram_hash","avg_r","avg_g","avg_b","alpha_coverage","edge_density"])
         self.table.setRowCount(len(keys))
         for i,k in enumerate(keys):
