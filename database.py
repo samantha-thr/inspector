@@ -568,6 +568,29 @@ class Database:
             (time.time(), status, summary, run_id),
         )
         self.commit()
+    def review_queue(self, limit=250):
+        return self.db.execute("""
+            SELECT r.asset_path, r.status, r.priority, r.updated,
+                   COALESCE((SELECT GROUP_CONCAT(tag, ', ') FROM asset_tags t WHERE t.asset_path=r.asset_path),'') tags
+            FROM asset_reviews r
+            WHERE COALESCE(r.status,'new') NOT IN ('reviewed','dismissed')
+            ORDER BY CASE r.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+                     r.updated DESC
+            LIMIT ?
+        """,(limit,)).fetchall()
+
+    def review_counts(self):
+        rows=self.db.execute("SELECT COALESCE(status,'new') status, COUNT(*) count FROM asset_reviews GROUP BY COALESCE(status,'new')").fetchall()
+        return {r["status"]:r["count"] for r in rows}
+
+    def recent_scan_history(self, limit=20):
+        return self.db.execute("SELECT * FROM scan_history ORDER BY id DESC LIMIT ?",(limit,)).fetchall()
+
+    def asset_kind(self, path):
+        if self.db.execute("SELECT 1 FROM models WHERE path=? LIMIT 1",(path,)).fetchone(): return "model"
+        if self.db.execute("SELECT 1 FROM textures WHERE path=? LIMIT 1",(path,)).fetchone(): return "texture"
+        return ""
+
 
     def recent_analysis_runs(self, limit=20):
         return self.db.execute(
