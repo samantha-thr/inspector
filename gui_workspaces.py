@@ -220,15 +220,23 @@ The model and database record will not be changed.",QMessageBox.Yes|QMessageBox.
         self.task=ThumbnailBatchTask([(row,textures)],False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
 
     def start(self):
-        rows,_=self.db.search_models_page(self.search.text().strip(),int(self.count.currentText()),0)
-        if not rows:return
-        items=[]
-        for row in rows:
-            if cached_thumbnail(row["path"]):continue
-            links=self.db.links_for_model(row["path"],100);items.append((dict(row),[x["texture_path"] for x in links if x["texture_path"]]))
+        target=int(self.count.currentText());term=self.search.text().strip();items=[];offset=0;page_size=max(250,target);checked=0;first_missing=None
+        while len(items)<target:
+            rows,total=self.db.search_models_page(term,page_size,offset)
+            if not rows:break
+            for row in rows:
+                checked+=1
+                if cached_thumbnail(row["path"]):continue
+                if first_missing is None:first_missing=offset+(rows.index(row))+1
+                links=self.db.links_for_model(row["path"],100)
+                items.append((dict(row),[x["texture_path"] for x in links if x["texture_path"]]))
+                if len(items)>=target:break
+            offset+=len(rows)
+            if offset>=total:break
         if not items:
-            self.status.setText("All models in this batch already have cached renders.");return
-        self.progress.setRange(0,len(items));self.progress.setValue(0);self.status.setText(f"Starting {len(items):,} missing renders…")
+            self.status.setText(f"All {checked:,} matching models already have cached renders.");return
+        self.progress.setRange(0,len(items));self.progress.setValue(0)
+        self.status.setText(f"Starting {len(items):,} missing renders • first uncached model #{first_missing:,} • skipped {checked-len(items):,} cached models")
         self.task=ThumbnailBatchTask(items,False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,name):
         self.progress.setValue(i);self.status.setText(f"Rendering {i:,} / {total:,} • {name}")
