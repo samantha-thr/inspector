@@ -208,9 +208,7 @@ class ThumbnailStudio(QWidget):
     def remove_render(self,path):
         p=cached_thumbnail(path)
         if not p:return
-        answer=QMessageBox.question(self,APP_NAME,f"Remove cached render for {Path(path).name}?
-
-The model and database record will not be changed.",QMessageBox.Yes|QMessageBox.No)
+        answer=QMessageBox.question(self,APP_NAME,f"Remove cached render for {Path(path).name}?" + chr(10) + chr(10) + "The model and database record will not be changed.",QMessageBox.Yes|QMessageBox.No)
         if answer==QMessageBox.Yes:
             Path(p).unlink(missing_ok=True);self.refresh()
 
