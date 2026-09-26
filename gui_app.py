@@ -8,7 +8,7 @@ from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
 from scanner import scan_folder, scan_textures
 from analysis_engine import rebuild_links, rebuild_families, rebuild_texture_families, rebuild_evidence, rebuild_texture_evidence
 from database import Database
-from gui_workspaces import AssetDialog, ComparePage, ConvertPage, KnowledgePage, SettingsPage
+from gui_workspaces import AssetDialog, ComparePage, ConvertPage, KnowledgePage, SettingsPage, texture_pixmap
 from model_thumbnail import cached_thumbnail
 
 BG="#101215"; PANEL="#181b20"; CYAN="#43e8e8"; TEXT="#e8eaed"; MUTED="#8f98a3"
@@ -59,7 +59,8 @@ class Browser(Page):
         row.addWidget(self.search,1); row.addWidget(QLabel("Rows")); row.addWidget(self.limit); row.addWidget(b); self.box.addLayout(row)
         self.table=QTableWidget(0,6); self.table.setHorizontalHeaderLabels(["Preview","Filename","Folder","Path","Details","Status"]); self.table.setSortingEnabled(True)
         self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.Stretch); self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.doubleClicked.connect(self.open_asset); self.box.addWidget(self.table,1)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.doubleClicked.connect(self.open_asset); self.table.itemSelectionChanged.connect(self.selection_preview)
+        split=QSplitter(Qt.Horizontal); split.addWidget(self.table); preview_box=QFrame(); preview_box.setObjectName("card"); pv=QVBoxLayout(preview_box); self.preview=QLabel("Select an asset for preview"); self.preview.setAlignment(Qt.AlignCenter); self.preview.setWordWrap(True); self.preview.setMinimumWidth(260); pv.addWidget(self.preview,1); split.addWidget(preview_box); split.setSizes([1100,300]); self.box.addWidget(split,1)
         nav=QHBoxLayout(); self.prev=QPushButton("Previous"); self.next=QPushButton("Next"); self.info=QLabel("")
         self.prev.clicked.connect(lambda:self.change_page(-1)); self.next.clicked.connect(lambda:self.change_page(1))
         nav.addWidget(self.prev); nav.addWidget(self.next); nav.addWidget(self.info); nav.addStretch(); self.box.addLayout(nav); self.refresh()
@@ -87,6 +88,22 @@ class Browser(Page):
             self.table.setRowHeight(r,56)
         self.prev.setEnabled(self.page>0); self.next.setEnabled(has_next)
         lo=start+1 if rows else 0; hi=start+len(rows); self.info.setText(f"Showing {lo:,}–{hi:,} of {total:,}")
+
+    def selection_preview(self):
+        row=self.table.currentRow()
+        if row<0:return
+        item=self.table.item(row,1)
+        if not item:return
+        path=item.data(Qt.UserRole)
+        if self.kind=="texture":
+            pix=texture_pixmap(path,300,300)
+            if pix.isNull():self.preview.setText(Path(path).name+"\n\nPreview unavailable")
+            else:self.preview.setPixmap(pix);self.preview.setToolTip(Path(path).name)
+        else:
+            p=cached_thumbnail(path,512)
+            if p:
+                pix=QPixmap(str(p));self.preview.setPixmap(pix.scaled(300,300,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+            else:self.preview.setText(Path(path).name+"\n\nDouble-click → Model Render → Generate to cache a visual thumbnail.")
 
     def open_asset(self,index):
         item=self.table.item(index.row(),1)
