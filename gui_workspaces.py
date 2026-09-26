@@ -120,14 +120,15 @@ Generate a LOD0 thumbnail to create one.")
 
 class ThumbnailBatchTask(QThread):
     progress=Signal(int,int,str); done=Signal(object)
-    def __init__(self,models,db,force=False):
-        super().__init__();self.models=models;self.db=db;self.force=force
+    def __init__(self,models,force=False):
+        super().__init__();self.models=models;self.force=force
     def run(self):
         ok=failed=cached=0
-        for i,row in enumerate(self.models,1):
+        for i,item in enumerate(self.models,1):
+            row,textures=item
             self.progress.emit(i,len(self.models),row["filename"])
-            if cached_thumbnail(row["path"]) and not self.force:cached+=1;continue
-            links=self.db.links_for_model(row["path"],100); textures=[x["texture_path"] for x in links if x["texture_path"]]
+            if cached_thumbnail(row["path"]) and not self.force:
+                cached+=1;continue
             try:
                 r=render_model_thumbnail(row["path"],textures,512,self.force)
                 if r.get("success"):ok+=1
