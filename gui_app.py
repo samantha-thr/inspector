@@ -3,7 +3,7 @@ import sys
 import time
 from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSettings
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QKeySequence, QShortcut
 from PySide6.QtWidgets import *
 from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
 from scanner import scan_folder, scan_textures
@@ -98,13 +98,17 @@ class Browser(Page):
         path=item.data(Qt.UserRole)
         if self.kind=="texture":
             pix=texture_pixmap(path,300,300)
-            if pix.isNull():self.preview.setText(Path(path).name+"\n\nPreview unavailable")
+            if pix.isNull():self.preview.setText(Path(path).name+"
+
+Preview unavailable")
             else:self.preview.setPixmap(pix);self.preview.setToolTip(Path(path).name)
         else:
             p=cached_thumbnail(path,512)
             if p:
                 pix=QPixmap(str(p));self.preview.setPixmap(pix.scaled(300,300,Qt.KeepAspectRatio,Qt.SmoothTransformation))
-            else:self.preview.setText(Path(path).name+"\n\nDouble-click → Model Render → Generate to cache a visual thumbnail.")
+            else:self.preview.setText(Path(path).name+"
+
+Double-click → Model Render → Generate to cache a visual thumbnail.")
 
     def open_asset(self,index):
         item=self.table.item(index.row(),1)
@@ -265,7 +269,7 @@ class Placeholder(Page):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__(); self.db=Database()
-        self.setWindowTitle(f"{APP_NAME} 3.0 GUI Preview"); self.resize(1450,900); self.setMinimumSize(1050,680)
+        self.setWindowTitle(f"{APP_NAME} {VERSION}"); self.resize(1450,900); self.setMinimumSize(1050,680)
         root=QWidget(); self.setCentralWidget(root); shell=QHBoxLayout(root); shell.setContentsMargins(0,0,0,0); shell.setSpacing(0)
         side=QFrame(); side.setObjectName("sidebar"); side.setFixedWidth(230); sb=QVBoxLayout(side); sb.setContentsMargins(18,22,18,18)
         brand=QLabel("THERE" + chr(10) + "INSPECTOR"); brand.setObjectName("brand"); sb.addWidget(brand)
@@ -280,6 +284,11 @@ class MainWindow(QMainWindow):
                ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),SettingsPage(self.db)]
         for p in pages:self.stack.addWidget(p)
         shell.addWidget(self.stack,1); self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.statusBar().showMessage(f"{self.db.count_models():,} models • {self.db.count_textures():,} textures • {DATABASE_PATH}")
+        QShortcut(QKeySequence("F5"),self,activated=self.refresh_all)
+        QShortcut(QKeySequence("Ctrl+1"),self,activated=lambda:self.nav.setCurrentRow(0))
+        QShortcut(QKeySequence("Ctrl+2"),self,activated=lambda:self.nav.setCurrentRow(1))
+        QShortcut(QKeySequence("Ctrl+3"),self,activated=lambda:self.nav.setCurrentRow(2))
     def refresh_all(self):
         for i in range(self.stack.count()):
             page = self.stack.widget(i)
