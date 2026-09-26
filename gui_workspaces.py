@@ -157,7 +157,10 @@ class ThumbnailStudio(QWidget):
     def start(self):
         rows,_=self.db.search_models_page(self.search.text().strip(),int(self.count.currentText()),0)
         if not rows:return
-        self.progress.setRange(0,len(rows));self.task=ThumbnailBatchTask(rows,self.db,False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
+        items=[]
+        for row in rows:
+            links=self.db.links_for_model(row["path"],100);items.append((dict(row),[x["texture_path"] for x in links if x["texture_path"]]))
+        self.progress.setRange(0,len(items));self.task=ThumbnailBatchTask(items,False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,name):
         self.progress.setValue(i);self.status.setText(f"{i:,} / {total:,} • {name}")
     def finished(self,result):
@@ -185,7 +188,8 @@ class ComparePage(QWidget):
                 p=cached_thumbnail(row["path"],512)
                 if p:
                     pix=QPixmap(str(p));label.setPixmap(pix.scaled(520,250,Qt.KeepAspectRatio,Qt.SmoothTransformation))
-                else:label.setText("No cached model render.\nOpen Asset Profile → Model Render to generate.")
+                else:label.setText("No cached model render.
+Open Asset Profile → Model Render to generate.")
         keys=["filename","folder","size","sha256"]+(["som_version","string_fingerprint","prefix_4k_sha256","middle_4k_sha256","suffix_4k_sha256"] if model else ["width","height","dds_format","ahash","histogram_hash","avg_r","avg_g","avg_b","alpha_coverage","edge_density"])
         self.table.setRowCount(len(keys))
         for i,k in enumerate(keys):
