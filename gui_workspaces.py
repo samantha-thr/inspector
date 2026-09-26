@@ -159,7 +159,20 @@ class KnowledgePage(QWidget):
         if self.type.text().strip() and self.key.text().strip():self.db.upsert_knowledge_rule(self.type.text().strip(),self.key.text().strip(),self.value.text().strip(),source="GUI");self.refresh()
 
 class SettingsPage(QWidget):
-    def __init__(self):
-        super().__init__();self.settings=QSettings("ThereInspector","ThereInspector");b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Settings");h.setObjectName("title");b.addWidget(h);f=QFormLayout();self.resource=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH));self.blender=QLineEdit(self.settings.value("blender_path",""));f.addRow("Resource folder",self.resource);f.addRow("Blender executable",self.blender);f.addRow("Database",QLabel(str(DATABASE_PATH)));b.addLayout(f);save=QPushButton("Save Settings");save.clicked.connect(self.save);b.addWidget(save);b.addStretch()
+    def __init__(self,db=None):
+        super().__init__();self.db=db;self.settings=QSettings("ThereInspector","ThereInspector");b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Settings");h.setObjectName("title");b.addWidget(h);f=QFormLayout();self.resource=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH));self.blender=QLineEdit(self.settings.value("blender_path",""));f.addRow("Resource folder",self.resource);f.addRow("Blender executable",self.blender);f.addRow("Database",QLabel(str(DATABASE_PATH)));b.addLayout(f);buttons=QHBoxLayout();save=QPushButton("Save Settings");save.clicked.connect(self.save);export=QPushButton("Export Diagnostic Snapshot");export.clicked.connect(self.export_snapshot);buttons.addWidget(save);buttons.addWidget(export);buttons.addStretch();b.addLayout(buttons);b.addStretch()
     def save(self):
-        self.settings.setValue("resource_path",self.resource.text());self.settings.setValue("blender_path",self.blender.text());QMessageBox.information(self,APP_NAME,"Settings saved.")
+        self.settings.setValue("resource_path",self.resource.text());self.settings.setValue("blender_path",self.blender.text())
+        if self.blender.text().strip():os.environ["BLENDER_EXE"]=self.blender.text().strip()
+        QMessageBox.information(self,APP_NAME,"Settings saved.")
+
+    def export_snapshot(self):
+        if not self.db:return
+        path,_=QFileDialog.getSaveFileName(self,"Export diagnostic snapshot","inspector_diagnostic.json","JSON (*.json)")
+        if not path:return
+        data={"database":str(DATABASE_PATH),"models":self.db.count_models(),"textures":self.db.count_textures(),
+              "relationships":self.db.relationship_stats(),"reviews":self.db.review_counts(),
+              "recent_scans":[dict(x) for x in self.db.recent_scan_history(20)],
+              "recent_analysis":[dict(x) for x in self.db.recent_analysis_runs(20)]}
+        Path(path).write_text(json.dumps(data,indent=2,default=str),encoding="utf-8")
+        QMessageBox.information(self,APP_NAME,"Diagnostic snapshot exported.")
