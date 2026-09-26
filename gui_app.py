@@ -74,7 +74,8 @@ class Browser(Page):
         start=self.page*limit
         rows,total=self.db.search_models_page(q,limit,start) if self.kind=="model" else self.db.search_textures_page(q,limit,start)
         has_next=start+len(rows)<total
-        self.table.setRowCount(len(rows))
+        self.table.setSortingEnabled(False)
+        self.table.clearContents(); self.table.setRowCount(len(rows))
         for r,x in enumerate(rows):
             preview=QTableWidgetItem()
             if self.kind=="model":
@@ -87,6 +88,7 @@ class Browser(Page):
             for col,v in enumerate(vals,1): self.table.setItem(r,col,QTableWidgetItem(str(v or "")))
             self.table.item(r,1).setData(Qt.UserRole,x["path"])
             self.table.setRowHeight(r,56)
+        self.table.setSortingEnabled(True)
         self.prev.setEnabled(self.page>0); self.next.setEnabled(has_next)
         lo=start+1 if rows else 0; hi=start+len(rows); self.info.setText(f"Showing {lo:,}–{hi:,} of {total:,}")
 
