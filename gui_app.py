@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys
-from PySide6.QtWidgets import *
-from config import APP_NAME, DEFAULT_SCAN_PATH, VERSION
+from PySide6.QtCore import QThread, Signal\nfrom PySide6.QtWidgets import *
+from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION\nfrom scanner import scan_folder, scan_textures\nfrom analysis_engine import rebuild_links, rebuild_families, rebuild_texture_families, rebuild_evidence, rebuild_texture_evidence
 from database import Database
 
 BG="#101215"; PANEL="#181b20"; CYAN="#43e8e8"; TEXT="#e8eaed"; MUTED="#8f98a3"
@@ -70,6 +70,70 @@ class Evidence(Page):
             for c,v in enumerate((x["overall_score"],x["path_a"],x["path_b"],x["evidence_type"],x["reasons"])):
                 self.table.setItem(r,c,QTableWidgetItem(str(v or "")))
 
+class Worker(QThread):
+    progress = Signal(dict)
+    finished_ok = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, fn, *args):
+        super().__init__(); self.fn=fn; self.args=args
+
+    def run(self):
+        try:
+            names = self.fn.__code__.co_varnames
+            kw = {}
+            if "progress_callback" in names: kw["progress_callback"] = self.progress.emit
+            elif "callback" in names: kw["callback"] = self.progress.emit
+            self.finished_ok.emit(self.fn(*self.args, **kw))
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+class Analysis(Page):
+    def __init__(self, changed):
+        super().__init__("Scan & Analysis","Run scans and rebuild Inspector intelligence without the command line")
+        self.changed=changed; self.worker=None
+        row=QHBoxLayout(); self.root=QLineEdit(DEFAULT_SCAN_PATH)
+        browse=QPushButton("Browse"); browse.clicked.connect(self.browse)
+        row.addWidget(QLabel("Resources")); row.addWidget(self.root,1); row.addWidget(browse); self.box.addLayout(row)
+        grid=QGridLayout()
+        jobs=[
+            ("Scan Models", lambda:self.start(scan_folder,self.root.text())),
+            ("Scan Textures", lambda:self.start(scan_textures,self.root.text())),
+            ("Rebuild Links", lambda:self.start(rebuild_links)),
+            ("Model Families", lambda:self.start(rebuild_families)),
+            ("Texture Families", lambda:self.start(rebuild_texture_families)),
+            ("Model Evidence", lambda:self.start(rebuild_evidence)),
+            ("Texture Evidence", lambda:self.start(rebuild_texture_evidence)),
+        ]
+        for i,(label,fn) in enumerate(jobs):
+            b=QPushButton(label); b.clicked.connect(fn); grid.addWidget(b,i//3,i%3)
+        self.box.addLayout(grid)
+        self.progress=QProgressBar(); self.progress.setRange(0,100); self.box.addWidget(self.progress)
+        self.status=QLabel("Ready"); self.status.setObjectName("muted"); self.box.addWidget(self.status); self.box.addStretch()
+
+    def browse(self):
+        p=QFileDialog.getExistingDirectory(self,"There resource folder",self.root.text())
+        if p: self.root.setText(p)
+
+    def start(self,fn,*args):
+        if self.worker and self.worker.isRunning():
+            QMessageBox.information(self,APP_NAME,"A job is already running."); return
+        self.progress.setValue(0); self.status.setText(f"Running {fn.__name__}...")
+        self.worker=Worker(fn,*args); self.worker.progress.connect(self.update_progress)
+        self.worker.finished_ok.connect(self.done); self.worker.failed.connect(self.fail); self.worker.start()
+
+    def update_progress(self,d):
+        total=int(d.get("total",0) or 0); idx=int(d.get("index",0) or 0)
+        if total: self.progress.setValue(min(100,int(idx*100/total)))
+        name=d.get("relative_path") or d.get("file") or d.get("method") or ""
+        self.status.setText(f"{idx:,} / {total:,}  {name}")
+
+    def done(self,result):
+        self.progress.setValue(100); self.status.setText("Complete"); self.changed()
+
+    def fail(self,error):
+        self.status.setText(error); QMessageBox.critical(self,"Job failed",error)
+
 class Placeholder(Page):
     def __init__(self,title,subtitle):
         super().__init__(title,subtitle)
@@ -88,11 +152,13 @@ class MainWindow(QMainWindow):
         sub=QLabel("Asset Intelligence Suite"); sub.setObjectName("muted"); sb.addWidget(sub); sb.addSpacing(20)
         self.nav=QListWidget(); self.nav.setObjectName("nav")
         names=["Dashboard","Models","Textures","Evidence","Compare","Convert","Knowledge","Scan & Analysis","Settings"]
-        self.nav.addItems(names); self.nav.setCurrentRow(0); sb.addWidget(self.nav,1); shell.addWidget(side)
+        self.nav.addItems(names); self.nav.setCurrentRow(0); sb.addWidget(self.nav,1)
+        db_label=QLabel(f"Database\\n{DATABASE_PATH}"); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
+        sb.addWidget(db_label); shell.addWidget(side)
         self.stack=QStackedWidget()
         pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),
                Placeholder("Compare","Side-by-side visual comparison"),Placeholder("Convert","There model conversion and Blender export"),
-               Placeholder("Knowledge","Rules, templates and learned context"),Placeholder("Scan & Analysis","Background scan and analysis controls"),
+               Placeholder("Knowledge","Rules, templates and learned context"),Analysis(self.refresh_all),
                Placeholder("Settings","Paths, thresholds, Blender and performance")]
         for p in pages:self.stack.addWidget(p)
         shell.addWidget(self.stack,1); self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
