@@ -18,6 +18,10 @@ python there_inspector_gui.py
 - Visual Library workspace for batch-generating and browsing model thumbnails
 - live selected-asset preview panes in Models and Textures
 - cached model imagery reused in Models, Compare and Asset Profiles
+- visual Similar Assets galleries driven by evidence candidates
+- enhanced texture Compare with amplified pixel-difference view and mean-pixel similarity
+- integrated Diagnostics workspace for database, decoder, Blender, Pillow and visual-cache readiness
+- F5 global refresh and quick Dashboard/Models/Textures keyboard navigation
 - model Asset Profiles with linked-texture visual galleries
 - Overview, Relationships, Evidence and Review tabs
 - review status, priority, tags and investigation notes
