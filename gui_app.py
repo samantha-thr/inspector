@@ -1,7 +1,10 @@
 from __future__ import annotations
 import sys
-from PySide6.QtCore import QThread, Signal\nfrom PySide6.QtWidgets import *
-from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION\nfrom scanner import scan_folder, scan_textures\nfrom analysis_engine import rebuild_links, rebuild_families, rebuild_texture_families, rebuild_evidence, rebuild_texture_evidence
+from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import *
+from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
+from scanner import scan_folder, scan_textures
+from analysis_engine import rebuild_links, rebuild_families, rebuild_texture_families, rebuild_evidence, rebuild_texture_evidence
 from database import Database
 
 BG="#101215"; PANEL="#181b20"; CYAN="#43e8e8"; TEXT="#e8eaed"; MUTED="#8f98a3"
@@ -148,12 +151,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} 3.0 GUI Preview"); self.resize(1450,900); self.setMinimumSize(1050,680)
         root=QWidget(); self.setCentralWidget(root); shell=QHBoxLayout(root); shell.setContentsMargins(0,0,0,0); shell.setSpacing(0)
         side=QFrame(); side.setObjectName("sidebar"); side.setFixedWidth(230); sb=QVBoxLayout(side); sb.setContentsMargins(18,22,18,18)
-        brand=QLabel("THERE\nINSPECTOR"); brand.setObjectName("brand"); sb.addWidget(brand)
+        brand=QLabel("THERE
+INSPECTOR"); brand.setObjectName("brand"); sb.addWidget(brand)
         sub=QLabel("Asset Intelligence Suite"); sub.setObjectName("muted"); sb.addWidget(sub); sb.addSpacing(20)
         self.nav=QListWidget(); self.nav.setObjectName("nav")
         names=["Dashboard","Models","Textures","Evidence","Compare","Convert","Knowledge","Scan & Analysis","Settings"]
         self.nav.addItems(names); self.nav.setCurrentRow(0); sb.addWidget(self.nav,1)
-        db_label=QLabel(f"Database\\n{DATABASE_PATH}"); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
+        db_label=QLabel(f"Database\
+{DATABASE_PATH}"); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
         sb.addWidget(db_label); shell.addWidget(side)
         self.stack=QStackedWidget()
         pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),
@@ -162,6 +167,12 @@ class MainWindow(QMainWindow):
                Placeholder("Settings","Paths, thresholds, Blender and performance")]
         for p in pages:self.stack.addWidget(p)
         shell.addWidget(self.stack,1); self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+    def refresh_all(self):
+        for i in range(self.stack.count()):
+            page = self.stack.widget(i)
+            if hasattr(page, "refresh"):
+                page.refresh()
+
     def closeEvent(self,event):
         self.db.close(); super().closeEvent(event)
 
