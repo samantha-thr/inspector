@@ -30,6 +30,25 @@ class Task(QThread):
         try:self.done.emit(self.fn(*self.args))
         except Exception as e:self.failed.emit(f"{type(e).__name__}: {e}")
 
+class TextureThumb(QFrame):
+    def __init__(self,path,title="",subtitle="",parent=None):
+        super().__init__(parent); self.path=str(path); self.setObjectName("card"); self.setMinimumWidth(190); self.setMaximumWidth(260)
+        b=QVBoxLayout(self); image=QLabel(); image.setAlignment(Qt.AlignCenter); image.setMinimumSize(170,150)
+        pix=texture_pixmap(self.path,220,180)
+        if pix.isNull(): image.setText("No preview")
+        else:image.setPixmap(pix)
+        b.addWidget(image)
+        name=QLabel(title or Path(self.path).name); name.setWordWrap(True); name.setAlignment(Qt.AlignCenter); b.addWidget(name)
+        if subtitle:
+            sub=QLabel(subtitle); sub.setWordWrap(True); sub.setAlignment(Qt.AlignCenter); sub.setStyleSheet("color:#8f98a3"); b.addWidget(sub)
+
+def texture_gallery(items):
+    area=QScrollArea(); area.setWidgetResizable(True); host=QWidget(); grid=QGridLayout(host); grid.setAlignment(Qt.AlignTop|Qt.AlignLeft)
+    for i,item in enumerate(items):
+        grid.addWidget(TextureThumb(item["path"],item.get("title",""),item.get("subtitle","")),i//4,i%4)
+    if not items:grid.addWidget(QLabel("No linked textures available for visual preview."),0,0)
+    area.setWidget(host); return area
+
 class AssetDialog(QDialog):
     def __init__(self,db,path,kind,parent=None):
         super().__init__(parent); self.db=db; self.path=path; self.kind=kind; self.resize(1000,720); self.setWindowTitle("Asset Profile")
@@ -37,14 +56,13 @@ class AssetDialog(QDialog):
         if not row: box.addWidget(QLabel("Asset not found.")); return
         h=QLabel(row["filename"]); h.setObjectName("title"); box.addWidget(h); box.addWidget(QLabel(row["relative_path"]))
         tabs=QTabWidget(); box.addWidget(tabs,1)
+        visual_items=[]
         if kind=="texture":
-            preview=QWidget(); pv=QVBoxLayout(preview); image=QLabel(); image.setAlignment(Qt.AlignCenter); image.setMinimumSize(500,380)
-            pix=texture_pixmap(row["path"])
-            if pix.isNull(): image.setText("Preview unavailable for this texture format.")
-            else: image.setPixmap(pix)
-            pv.addWidget(image,1)
-            meta=QLabel(f"{row['width'] or row['dds_width'] or 0} × {row['height'] or row['dds_height'] or 0}   •   {row['dds_format'] or row['extension']}   •   {int(row['size'] or 0):,} bytes")
-            meta.setAlignment(Qt.AlignCenter); pv.addWidget(meta); tabs.addTab(preview,"Preview")
+            visual_items=[{"path":row["path"],"title":row["filename"],"subtitle":f"{row['width'] or row['dds_width'] or 0} × {row['height'] or row['dds_height'] or 0}"}]
+        else:
+            for link in db.links_for_model(row["path"],24):
+                visual_items.append({"path":link["texture_path"],"title":Path(link["texture_path"]).name,"subtitle":f"Link score {link['score']}"})
+        tabs.addTab(texture_gallery(visual_items),"Visual")
         over=QWidget(); form=QFormLayout(over)
         keys=["folder","size","sha256","som_version","filename_type"] if kind=="model" else ["folder","size","sha256","width","height","dds_format","analysis_status","ahash"]
         for k in keys:
@@ -85,10 +103,21 @@ class ComparePage(QWidget):
         super().__init__();self.db=db;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Compare");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Side-by-side asset metadata and fingerprints"))
         r=QHBoxLayout();self.kind=QComboBox();self.kind.addItems(["Models","Textures"]);self.a=QLineEdit();self.b=QLineEdit();self.a.setPlaceholderText("Asset A");self.b.setPlaceholderText("Asset B");go=QPushButton("Compare");go.clicked.connect(self.compare)
         for w in (self.kind,self.a,self.b,go):r.addWidget(w)
-        b.addLayout(r);self.table=QTableWidget(0,3);self.table.setHorizontalHeaderLabels(["Property","Asset A","Asset B"]);self.table.horizontalHeader().setSectionResizeMode(1,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch);b.addWidget(self.table,1)
+        b.addLayout(r)
+        self.visual=QHBoxLayout(); self.left_preview=QLabel("Asset A preview"); self.right_preview=QLabel("Asset B preview")
+        for p in (self.left_preview,self.right_preview): p.setAlignment(Qt.AlignCenter); p.setMinimumHeight(260); p.setStyleSheet("background:#181b20;border:1px solid #2b3038;border-radius:8px")
+        self.visual.addWidget(self.left_preview,1); self.visual.addWidget(self.right_preview,1); b.addLayout(self.visual)
+        self.table=QTableWidget(0,3);self.table.setHorizontalHeaderLabels(["Property","Asset A","Asset B"]);self.table.horizontalHeader().setSectionResizeMode(1,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch);b.addWidget(self.table,1)
     def compare(self):
         model=self.kind.currentIndex()==0;a=self.db.model_by_query(self.a.text()) if model else self.db.texture_by_query(self.a.text());bb=self.db.model_by_query(self.b.text()) if model else self.db.texture_by_query(self.b.text())
         if not a or not bb:QMessageBox.warning(self,APP_NAME,"Could not find both assets.");return
+        if not model:
+            pa=texture_pixmap(a["path"],520,250); pb=texture_pixmap(bb["path"],520,250)
+            self.left_preview.setPixmap(pa) if not pa.isNull() else self.left_preview.setText("Preview unavailable")
+            self.right_preview.setPixmap(pb) if not pb.isNull() else self.right_preview.setText("Preview unavailable")
+        else:
+            self.left_preview.setText("Model visual preview: linked textures available from Asset Profile")
+            self.right_preview.setText("Model visual preview: linked textures available from Asset Profile")
         keys=["filename","folder","size","sha256"]+(["som_version","string_fingerprint","prefix_4k_sha256","middle_4k_sha256","suffix_4k_sha256"] if model else ["width","height","dds_format","ahash","histogram_hash","avg_r","avg_g","avg_b","alpha_coverage","edge_density"])
         self.table.setRowCount(len(keys))
         for i,k in enumerate(keys):
