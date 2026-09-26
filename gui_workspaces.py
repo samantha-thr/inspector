@@ -101,6 +101,20 @@ class AssetDialog(QDialog):
             for j,v in enumerate((x["overall_score"],x["path_a"],x["path_b"],x["reasons"])):ev.setItem(i,j,QTableWidgetItem(str(v or "")))
         for j in (1,2,3):ev.horizontalHeader().setSectionResizeMode(j,QHeaderView.Stretch)
         tabs.addTab(ev,"Evidence")
+        similar=QScrollArea();similar.setWidgetResizable(True);sh=QWidget();sg=QGridLayout(sh);sg.setAlignment(Qt.AlignTop|Qt.AlignLeft);seen=set();shown=0
+        for x in rows[:24]:
+            other=x["path_b"] if x["path_a"]==row["path"] else x["path_a"]
+            if other in seen:continue
+            seen.add(other);card=QFrame();card.setObjectName("card");cv=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);im.setMinimumSize(180,145)
+            if kind=="texture":pix=texture_pixmap(other,210,160)
+            else:
+                cp=cached_thumbnail(other,512);pix=QPixmap(str(cp)).scaled(210,160,Qt.KeepAspectRatio,Qt.SmoothTransformation) if cp else QPixmap()
+            if pix.isNull():im.setText("No visual cached")
+            else:im.setPixmap(pix)
+            cv.addWidget(im);nm=QLabel(Path(other).name);nm.setWordWrap(True);nm.setAlignment(Qt.AlignCenter);cv.addWidget(nm);sc=QLabel(f"Evidence {x['overall_score']}");sc.setAlignment(Qt.AlignCenter);cv.addWidget(sc)
+            sg.addWidget(card,shown//4,shown%4);shown+=1
+        if not shown:sg.addWidget(QLabel("No visual evidence candidates available."),0,0)
+        similar.setWidget(sh);tabs.addTab(similar,"Similar Visuals")
         review=QWidget(); vb=QVBoxLayout(review); current=db.get_asset_review(row["path"])
         rr=QHBoxLayout(); self.status=QComboBox(); self.status.addItems(["new","reviewing","reviewed","dismissed","confirmed"]); self.priority=QComboBox(); self.priority.addItems(["low","normal","high","critical"])
         if current:self.status.setCurrentText(current["status"] or "new"); self.priority.setCurrentText(current["priority"] or "normal")
