@@ -118,6 +118,51 @@ Generate a LOD0 thumbnail to create one.")
         if self.note.toPlainText().strip():self.db.add_asset_note(path,self.note.toPlainText());self.note.clear()
         QMessageBox.information(self,APP_NAME,"Review saved.")
 
+class ThumbnailBatchTask(QThread):
+    progress=Signal(int,int,str); done=Signal(object)
+    def __init__(self,models,db,force=False):
+        super().__init__();self.models=models;self.db=db;self.force=force
+    def run(self):
+        ok=failed=cached=0
+        for i,row in enumerate(self.models,1):
+            self.progress.emit(i,len(self.models),row["filename"])
+            if cached_thumbnail(row["path"]) and not self.force:cached+=1;continue
+            links=self.db.links_for_model(row["path"],100); textures=[x["texture_path"] for x in links if x["texture_path"]]
+            try:
+                r=render_model_thumbnail(row["path"],textures,512,self.force)
+                if r.get("success"):ok+=1
+                else:failed+=1
+            except Exception:failed+=1
+        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":len(self.models)})
+
+class ThumbnailStudio(QWidget):
+    def __init__(self,db):
+        super().__init__();self.db=db;self.task=None;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        h=QLabel("Visual Library");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Build and manage cached LOD0 renders for the indexed model library."))
+        r=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Optional filename/folder/path filter");self.count=QComboBox();self.count.addItems(["25","50","100","250","500","1000"]);self.count.setCurrentText("100")
+        go=QPushButton("Render Missing");go.clicked.connect(self.start);refresh=QPushButton("Refresh Gallery");refresh.clicked.connect(self.refresh)
+        for w in (self.search,QLabel("Batch"),self.count,go,refresh):r.addWidget(w)
+        b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
+        self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.refresh()
+    def refresh(self):
+        rows,_=self.db.search_models_page(self.search.text().strip(),int(self.count.currentText()),0)
+        host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0
+        for row in rows:
+            p=cached_thumbnail(row["path"])
+            if not p:continue
+            card=QFrame();card.setObjectName("card");v=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);pix=QPixmap(str(p));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation));v.addWidget(im)
+            n=QLabel(row["filename"]);n.setWordWrap(True);n.setAlignment(Qt.AlignCenter);v.addWidget(n);grid.addWidget(card,shown//4,shown%4);shown+=1
+        if not shown:grid.addWidget(QLabel("No cached renders in this selection yet."),0,0)
+        self.area.setWidget(host);self.status.setText(f"{shown:,} cached renders shown.")
+    def start(self):
+        rows,_=self.db.search_models_page(self.search.text().strip(),int(self.count.currentText()),0)
+        if not rows:return
+        self.progress.setRange(0,len(rows));self.task=ThumbnailBatchTask(rows,self.db,False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
+    def on_progress(self,i,total,name):
+        self.progress.setValue(i);self.status.setText(f"{i:,} / {total:,} • {name}")
+    def finished(self,result):
+        self.status.setText(f"Rendered {result['rendered']:,} • cached {result['cached']:,} • failed {result['failed']:,}");self.refresh()
+
 class ComparePage(QWidget):
     def __init__(self,db):
         super().__init__();self.db=db;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Compare");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Side-by-side asset metadata and fingerprints"))
