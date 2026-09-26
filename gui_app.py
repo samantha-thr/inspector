@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys
 import time
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSettings
 from PySide6.QtWidgets import *
 from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
 from scanner import scan_folder, scan_textures
@@ -137,7 +137,7 @@ class Analysis(Page):
     def __init__(self,changed):
         super().__init__("Scan & Analysis","Run scans and rebuild Inspector intelligence without the command line")
         self.changed=changed; self.worker=None; self.started_at=0.0; self.sequence=[]; self.sequence_index=0; self.sequence_name=""
-        row=QHBoxLayout(); self.root=QLineEdit(DEFAULT_SCAN_PATH); browse=QPushButton("Browse"); browse.clicked.connect(self.browse)
+        row=QHBoxLayout(); self.settings=QSettings("ThereInspector","ThereInspector"); self.root=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH)); browse=QPushButton("Browse"); browse.clicked.connect(self.browse)
         row.addWidget(QLabel("Resources")); row.addWidget(self.root,1); row.addWidget(browse); self.box.addLayout(row)
 
         card=QFrame(); card.setObjectName("card"); cb=QVBoxLayout(card)
@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
         sb.addWidget(db_label); shell.addWidget(side)
         self.stack=QStackedWidget()
         pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),ReviewQueue(self.db),
-               ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),SettingsPage()]
+               ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),SettingsPage(self.db)]
         for p in pages:self.stack.addWidget(p)
         shell.addWidget(self.stack,1); self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
     def refresh_all(self):
