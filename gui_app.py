@@ -45,28 +45,38 @@ class Dashboard(Page):
 class Browser(Page):
     def __init__(self,db,kind):
         title="Models" if kind=="model" else "Textures"
-        super().__init__(title,"Search and inspect indexed assets"); self.db=db; self.kind=kind
+        super().__init__(title,"Search and inspect indexed assets"); self.db=db; self.kind=kind; self.page=0
         row=QHBoxLayout(); self.search=QLineEdit(); self.search.setPlaceholderText("Filename, folder, path or hash")
-        b=QPushButton("Search"); b.clicked.connect(self.refresh); self.search.returnPressed.connect(self.refresh)
-        row.addWidget(self.search,1); row.addWidget(b); self.box.addLayout(row)
-        self.table=QTableWidget(0,5)
-        self.table.setHorizontalHeaderLabels(["Filename","Folder","Path","Details","Status"])
-        self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.doubleClicked.connect(self.open_asset); self.box.addWidget(self.table,1); self.refresh()
+        b=QPushButton("Search"); b.clicked.connect(self.reset_search); self.search.returnPressed.connect(self.reset_search)
+        self.limit=QComboBox(); self.limit.addItems(["250","500","1000","2500","5000"]); self.limit.setCurrentText("1000")
+        row.addWidget(self.search,1); row.addWidget(QLabel("Rows")); row.addWidget(self.limit); row.addWidget(b); self.box.addLayout(row)
+        self.table=QTableWidget(0,5); self.table.setHorizontalHeaderLabels(["Filename","Folder","Path","Details","Status"])
+        self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.doubleClicked.connect(self.open_asset); self.box.addWidget(self.table,1)
+        nav=QHBoxLayout(); self.prev=QPushButton("Previous"); self.next=QPushButton("Next"); self.info=QLabel("")
+        self.prev.clicked.connect(lambda:self.change_page(-1)); self.next.clicked.connect(lambda:self.change_page(1))
+        nav.addWidget(self.prev); nav.addWidget(self.next); nav.addWidget(self.info); nav.addStretch(); self.box.addLayout(nav); self.refresh()
+
+    def reset_search(self): self.page=0; self.refresh()
+    def change_page(self,d): self.page=max(0,self.page+d); self.refresh()
+
     def refresh(self):
-        q=self.search.text().strip()
-        rows=self.db.search_models(q,250) if self.kind=="model" else self.db.search_textures(q,250)
+        q=self.search.text().strip(); limit=int(self.limit.currentText())
+        fetch=(self.page+1)*limit+1
+        allrows=self.db.search_models(q,fetch) if self.kind=="model" else self.db.search_textures(q,fetch)
+        start=self.page*limit; rows=allrows[start:start+limit]; has_next=len(allrows)>start+limit
         self.table.setRowCount(len(rows))
         for r,x in enumerate(rows):
             if self.kind=="model": vals=(x["filename"],x["folder"],x["relative_path"],f"{int(x['size'] or 0):,} bytes",(x["sha256"] or "")[:16])
             else: vals=(x["filename"],x["folder"],x["relative_path"],f"{x['width'] or x['dds_width'] or 0} x {x['height'] or x['dds_height'] or 0}",x["dds_format"] or x["analysis_status"])
-            for c,v in enumerate(vals): self.table.setItem(r,c,QTableWidgetItem(str(v or "")))
+            for col,v in enumerate(vals): self.table.setItem(r,col,QTableWidgetItem(str(v or "")))
             self.table.item(r,0).setData(Qt.UserRole,x["path"])
+        self.prev.setEnabled(self.page>0); self.next.setEnabled(has_next)
+        lo=start+1 if rows else 0; hi=start+len(rows); self.info.setText(f"Showing {lo:,}–{hi:,}" + (" • more available" if has_next else ""))
 
     def open_asset(self,index):
         item=self.table.item(index.row(),0)
-        if item:
-            dlg=AssetDialog(self.db,item.data(Qt.UserRole),self.kind,self)
-            dlg.exec()
+        if item: AssetDialog(self.db,item.data(Qt.UserRole),self.kind,self).exec()
 
 class Evidence(Page):
     def __init__(self,db):
