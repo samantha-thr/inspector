@@ -1,12 +1,13 @@
 from __future__ import annotations
 import sys
 import time
-from PySide6.QtCore import QThread, Signal, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtWidgets import *
 from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
 from scanner import scan_folder, scan_textures
 from analysis_engine import rebuild_links, rebuild_families, rebuild_texture_families, rebuild_evidence, rebuild_texture_evidence
 from database import Database
+from gui_workspaces import AssetDialog, ComparePage, ConvertPage, KnowledgePage, SettingsPage
 
 BG="#101215"; PANEL="#181b20"; CYAN="#43e8e8"; TEXT="#e8eaed"; MUTED="#8f98a3"
 
@@ -50,7 +51,7 @@ class Browser(Page):
         row.addWidget(self.search,1); row.addWidget(b); self.box.addLayout(row)
         self.table=QTableWidget(0,5)
         self.table.setHorizontalHeaderLabels(["Filename","Folder","Path","Details","Status"])
-        self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.box.addWidget(self.table,1); self.refresh()
+        self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.doubleClicked.connect(self.open_asset); self.box.addWidget(self.table,1); self.refresh()
     def refresh(self):
         q=self.search.text().strip()
         rows=self.db.search_models(q,250) if self.kind=="model" else self.db.search_textures(q,250)
@@ -59,6 +60,13 @@ class Browser(Page):
             if self.kind=="model": vals=(x["filename"],x["folder"],x["relative_path"],f"{int(x['size'] or 0):,} bytes",(x["sha256"] or "")[:16])
             else: vals=(x["filename"],x["folder"],x["relative_path"],f"{x['width'] or x['dds_width'] or 0} x {x['height'] or x['dds_height'] or 0}",x["dds_format"] or x["analysis_status"])
             for c,v in enumerate(vals): self.table.setItem(r,c,QTableWidgetItem(str(v or "")))
+            self.table.item(r,0).setData(Qt.UserRole,x["path"])
+
+    def open_asset(self,index):
+        item=self.table.item(index.row(),0)
+        if item:
+            dlg=AssetDialog(self.db,item.data(Qt.UserRole),self.kind,self)
+            dlg.exec()
 
 class Evidence(Page):
     def __init__(self,db):
@@ -194,9 +202,8 @@ class MainWindow(QMainWindow):
         sb.addWidget(db_label); shell.addWidget(side)
         self.stack=QStackedWidget()
         pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),
-               Placeholder("Compare","Side-by-side visual comparison"),Placeholder("Convert","There model conversion and Blender export"),
-               Placeholder("Knowledge","Rules, templates and learned context"),Analysis(self.refresh_all),
-               Placeholder("Settings","Paths, thresholds, Blender and performance")]
+               ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),
+               SettingsPage()]
         for p in pages:self.stack.addWidget(p)
         shell.addWidget(self.stack,1); self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
     def refresh_all(self):
