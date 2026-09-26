@@ -45,13 +45,13 @@ center=(mn+mx)/2; extent=max((mx-mn).x,(mx-mn).y,(mx-mn).z,0.01)
 scene=bpy.context.scene
 scene.render.engine="BLENDER_EEVEE_NEXT"
 scene.render.resolution_x=size; scene.render.resolution_y=size; scene.render.resolution_percentage=100
-scene.render.film_transparent=True
+scene.render.film_transparent=False
 scene.render.image_settings.file_format="PNG"; scene.render.filepath=str(out)
 scene.render.resolution_percentage=100
 world=scene.world or bpy.data.worlds.new("World"); scene.world=world
-world.use_nodes=True; world.node_tree.nodes["Background"].inputs["Color"].default_value=(0.035,0.04,0.05,1); world.node_tree.nodes["Background"].inputs["Strength"].default_value=0.35
+world.use_nodes=True; world.node_tree.nodes["Background"].inputs["Color"].default_value=(0.42,0.42,0.42,1); world.node_tree.nodes["Background"].inputs["Strength"].default_value=0.8
 cam_data=bpy.data.cameras.new("InspectorCamera"); cam=bpy.data.objects.new("InspectorCamera",cam_data); scene.collection.objects.link(cam); scene.camera=cam
-cam.data.type="ORTHO"; cam.data.ortho_scale=extent*1.55
+cam.data.type="ORTHO"; cam.data.ortho_scale=extent*1.32
 direction=Vector((1.35,-1.65,1.05)).normalized(); cam.location=center+direction*extent*3
 def track(obj,target):
     obj.rotation_euler=((target-obj.location).to_track_quat("-Z","Y")).to_euler()
