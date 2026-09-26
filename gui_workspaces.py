@@ -182,31 +182,41 @@ class ThumbnailStudio(QWidget):
 
 class ComparePage(QWidget):
     def __init__(self,db):
-        super().__init__();self.db=db;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Compare");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Side-by-side asset metadata and fingerprints"))
-        r=QHBoxLayout();self.kind=QComboBox();self.kind.addItems(["Models","Textures"]);self.a=QLineEdit();self.b=QLineEdit();self.a.setPlaceholderText("Asset A");self.b.setPlaceholderText("Asset B");go=QPushButton("Compare");go.clicked.connect(self.compare)
+        super().__init__();self.db=db;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        h=QLabel("Compare");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Side-by-side visual and forensic comparison"))
+        r=QHBoxLayout();self.kind=QComboBox();self.kind.addItems(["Models","Textures"]);self.a=QLineEdit();self.b=QLineEdit()
+        self.a.setPlaceholderText("Asset A filename/path");self.b.setPlaceholderText("Asset B filename/path");go=QPushButton("Compare");go.clicked.connect(self.compare)
         for w in (self.kind,self.a,self.b,go):r.addWidget(w)
         b.addLayout(r)
-        self.visual=QHBoxLayout(); self.left_preview=QLabel("Asset A preview"); self.right_preview=QLabel("Asset B preview")
-        for p in (self.left_preview,self.right_preview): p.setAlignment(Qt.AlignCenter); p.setMinimumHeight(260); p.setStyleSheet("background:#181b20;border:1px solid #2b3038;border-radius:8px")
-        self.visual.addWidget(self.left_preview,1); self.visual.addWidget(self.right_preview,1); b.addLayout(self.visual)
-        self.table=QTableWidget(0,3);self.table.setHorizontalHeaderLabels(["Property","Asset A","Asset B"]);self.table.horizontalHeader().setSectionResizeMode(1,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch);b.addWidget(self.table,1)
+        visual=QHBoxLayout();self.left_preview=QLabel("Asset A preview");self.right_preview=QLabel("Asset B preview")
+        for p in (self.left_preview,self.right_preview):
+            p.setAlignment(Qt.AlignCenter);p.setMinimumHeight(240);p.setStyleSheet("background:#181b20;border:1px solid #2b3038;border-radius:8px")
+        visual.addWidget(self.left_preview,1);visual.addWidget(self.right_preview,1);b.addLayout(visual)
+        self.diff_preview=QLabel("Texture difference view");self.diff_preview.setAlignment(Qt.AlignCenter);self.diff_preview.setMinimumHeight(110)
+        self.diff_preview.setStyleSheet("background:#181b20;border:1px solid #2b3038;border-radius:8px");b.addWidget(self.diff_preview)
+        self.table=QTableWidget(0,3);self.table.setHorizontalHeaderLabels(["Property","Asset A","Asset B"])
+        self.table.horizontalHeader().setSectionResizeMode(1,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch);b.addWidget(self.table,1)
     def compare(self):
-        model=self.kind.currentIndex()==0;a=self.db.model_by_query(self.a.text()) if model else self.db.texture_by_query(self.a.text());bb=self.db.model_by_query(self.b.text()) if model else self.db.texture_by_query(self.b.text())
-        if not a or not bb:QMessageBox.warning(self,APP_NAME,"Could not find both assets.");return
+        model=self.kind.currentIndex()==0
+        a=self.db.model_by_query(self.a.text()) if model else self.db.texture_by_query(self.a.text())
+        bb=self.db.model_by_query(self.b.text()) if model else self.db.texture_by_query(self.b.text())
+        if not a or not bb:
+            QMessageBox.warning(self,APP_NAME,"Could not find both assets.");return
         if not model:
-            pa=texture_pixmap(a["path"],520,250); pb=texture_pixmap(bb["path"],520,250)
+            pa=texture_pixmap(a["path"],520,240);pb=texture_pixmap(bb["path"],520,240)
             self.left_preview.setPixmap(pa) if not pa.isNull() else self.left_preview.setText("Preview unavailable")
             self.right_preview.setPixmap(pb) if not pb.isNull() else self.right_preview.setText("Preview unavailable")
             dp,sim=texture_diff_pixmap(a["path"],bb["path"])
-            if not dp.isNull():self.diff_preview.setPixmap(dp);self.diff_preview.setToolTip(f"Mean pixel similarity: {sim:.2f}%")
+            if not dp.isNull():
+                self.diff_preview.setPixmap(dp);self.diff_preview.setToolTip(f"Mean pixel similarity: {sim:.2f}%")
             else:self.diff_preview.setText("Difference preview unavailable")
         else:
+            self.diff_preview.setText("Pixel difference view applies to textures.")
             for label,row in ((self.left_preview,a),(self.right_preview,bb)):
                 p=cached_thumbnail(row["path"],512)
                 if p:
-                    pix=QPixmap(str(p));label.setPixmap(pix.scaled(520,250,Qt.KeepAspectRatio,Qt.SmoothTransformation))
-                else:label.setText("No cached model render.
-Open Asset Profile → Model Render to generate.")
+                    pix=QPixmap(str(p));label.setPixmap(pix.scaled(520,240,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+                else:label.setText("No cached model render. Open Asset Profile → Model Render to generate.")
         keys=["filename","folder","size","sha256"]+(["som_version","string_fingerprint","prefix_4k_sha256","middle_4k_sha256","suffix_4k_sha256"] if model else ["width","height","dds_format","ahash","histogram_hash","avg_r","avg_g","avg_b","alpha_coverage","edge_density"])
         self.table.setRowCount(len(keys))
         for i,k in enumerate(keys):
