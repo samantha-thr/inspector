@@ -313,6 +313,18 @@ class Database:
         like = f"%{term}%"
         return self.db.execute("SELECT * FROM textures WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ? OR dds_format LIKE ? ORDER BY folder,filename LIMIT ?", (like, like, like, like, like, limit)).fetchall()
 
+    def search_models_page(self, term="", limit=1000, offset=0):
+        like=f"%{term}%"
+        rows=self.db.execute("SELECT * FROM models WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ? ORDER BY folder,filename LIMIT ? OFFSET ?",(like,like,like,like,limit,offset)).fetchall()
+        total=self.db.execute("SELECT COUNT(*) FROM models WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ?",(like,like,like,like)).fetchone()[0]
+        return rows,total
+
+    def search_textures_page(self, term="", limit=1000, offset=0):
+        like=f"%{term}%"
+        rows=self.db.execute("SELECT * FROM textures WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ? OR dds_format LIKE ? ORDER BY folder,filename LIMIT ? OFFSET ?",(like,like,like,like,like,limit,offset)).fetchall()
+        total=self.db.execute("SELECT COUNT(*) FROM textures WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ? OR dds_format LIKE ?",(like,like,like,like,like)).fetchone()[0]
+        return rows,total
+
     def model_by_query(self, q):
         return self.db.execute("SELECT * FROM models WHERE path=? OR relative_path=? OR filename=? ORDER BY relative_path LIMIT 1", (q, q, q)).fetchone()
 
