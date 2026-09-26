@@ -27,7 +27,7 @@ class Card(QFrame):
 class Dashboard(Page):
     def __init__(self,db):
         super().__init__("Dashboard","Asset intelligence overview"); self.db=db
-        row=QHBoxLayout(); self.cards=[Card(x) for x in ("Models","Textures","Model Families","Evidence")]
+        row=QHBoxLayout(); self.cards=[Card(x) for x in ("Models","Textures","Evidence","Review Queue")]
         for c in self.cards: row.addWidget(c)
         self.box.addLayout(row)
         self.table=QTableWidget(0,4); self.table.setHorizontalHeaderLabels(["Score","Asset A","Asset B","Reasons"])
@@ -35,7 +35,7 @@ class Dashboard(Page):
         self.box.addWidget(self.table,1); self.refresh()
     def refresh(self):
         s=self.db.relationship_stats()
-        vals=[self.db.count_models(),self.db.count_textures(),s.get("families",0),s.get("evidence_pairs",0)+s.get("texture_evidence_pairs",0)]
+        rc=self.db.review_counts(); vals=[self.db.count_models(),self.db.count_textures(),s.get("evidence_pairs",0)+s.get("texture_evidence_pairs",0),sum(v for k,v in rc.items() if k not in ("reviewed","dismissed"))]
         for c,v in zip(self.cards,vals): c.value.setText(f"{int(v or 0):,}")
         rows=self.db.top_evidence(30); self.table.setRowCount(len(rows))
         for r,x in enumerate(rows):
@@ -84,6 +84,8 @@ class Evidence(Page):
         self.mode=QComboBox(); self.mode.addItems(["Model Evidence","Texture Evidence"]); self.mode.currentIndexChanged.connect(self.refresh); self.box.addWidget(self.mode)
         self.table=QTableWidget(0,5); self.table.setHorizontalHeaderLabels(["Score","Asset A","Asset B","Type","Reasons"])
         for i in (1,2,4): self.table.horizontalHeader().setSectionResizeMode(i,QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.doubleClicked.connect(self.open_evidence_asset)
         self.box.addWidget(self.table,1); self.refresh()
     def refresh(self):
         rows=self.db.top_evidence(200) if self.mode.currentIndex()==0 else self.db.top_texture_evidence(200)
@@ -91,6 +93,33 @@ class Evidence(Page):
         for r,x in enumerate(rows):
             for c,v in enumerate((x["overall_score"],x["path_a"],x["path_b"],x["evidence_type"],x["reasons"])):
                 self.table.setItem(r,c,QTableWidgetItem(str(v or "")))
+            self.table.item(r,1).setData(Qt.UserRole,x["path_a"]); self.table.item(r,2).setData(Qt.UserRole,x["path_b"])
+
+    def open_evidence_asset(self,index):
+        col=1 if index.column()!=2 else 2; item=self.table.item(index.row(),col)
+        if item:
+            kind="model" if self.mode.currentIndex()==0 else "texture"
+            AssetDialog(self.db,item.data(Qt.UserRole),kind,self).exec()
+
+class ReviewQueue(Page):
+    def __init__(self,db):
+        super().__init__("Review Queue","Prioritized assets awaiting investigation"); self.db=db
+        row=QHBoxLayout(); refresh=QPushButton("Refresh"); refresh.clicked.connect(self.refresh); row.addStretch(); row.addWidget(refresh); self.box.addLayout(row)
+        self.table=QTableWidget(0,5); self.table.setHorizontalHeaderLabels(["Priority","Status","Asset","Tags","Updated"])
+        self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.doubleClicked.connect(self.open_asset)
+        self.box.addWidget(self.table,1); self.refresh()
+    def refresh(self):
+        rows=self.db.review_queue(1000); self.table.setRowCount(len(rows))
+        for r,x in enumerate(rows):
+            vals=(x["priority"],x["status"],x["asset_path"],x["tags"],time.strftime("%Y-%m-%d %H:%M",time.localtime(x["updated"] or 0)) if x["updated"] else "")
+            for col,v in enumerate(vals):self.table.setItem(r,col,QTableWidgetItem(str(v or "")))
+            self.table.item(r,2).setData(Qt.UserRole,x["asset_path"])
+    def open_asset(self,index):
+        item=self.table.item(index.row(),2)
+        if item:
+            path=item.data(Qt.UserRole); kind=self.db.asset_kind(path)
+            if kind:AssetDialog(self.db,path,kind,self).exec(); self.refresh()
 
 class Worker(QThread):
     progress=Signal(dict); finished_ok=Signal(object); failed=Signal(str)
@@ -206,14 +235,12 @@ class MainWindow(QMainWindow):
         brand=QLabel("THERE" + chr(10) + "INSPECTOR"); brand.setObjectName("brand"); sb.addWidget(brand)
         sub=QLabel("Asset Intelligence Suite"); sub.setObjectName("muted"); sb.addWidget(sub); sb.addSpacing(20)
         self.nav=QListWidget(); self.nav.setObjectName("nav")
-        names=["Dashboard","Models","Textures","Evidence","Compare","Convert","Knowledge","Scan & Analysis","Settings"]
+        names=["Dashboard","Models","Textures","Evidence","Review Queue","Compare","Convert","Knowledge","Scan & Analysis","Settings"]
         self.nav.addItems(names); self.nav.setCurrentRow(0); sb.addWidget(self.nav,1)
         db_label=QLabel("Database" + chr(10) + str(DATABASE_PATH)); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
         sb.addWidget(db_label); shell.addWidget(side)
         self.stack=QStackedWidget()
-        pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),
-               ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),
-               SettingsPage()]
+        pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),ReviewQueue(self.db),\n               ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),SettingsPage()]
         for p in pages:self.stack.addWidget(p)
         shell.addWidget(self.stack,1); self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
     def refresh_all(self):
