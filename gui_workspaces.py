@@ -187,11 +187,13 @@ class ThumbnailStudio(QWidget):
         items=[]
         for row in rows:
             links=self.db.links_for_model(row["path"],100);items.append((dict(row),[x["texture_path"] for x in links if x["texture_path"]]))
-        self.progress.setRange(0,len(items));self.task=ThumbnailBatchTask(items,False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
+        self.progress.setRange(0,len(items));self.progress.setValue(0);self.status.setText(f"Starting batch of {len(items):,} models…")
+        self.task=ThumbnailBatchTask(items,False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,name):
-        self.progress.setValue(i);self.status.setText(f"{i:,} / {total:,} • {name}")
+        self.progress.setValue(i);self.status.setText(f"Rendering {i:,} / {total:,} • {name}")
     def finished(self,result):
-        self.status.setText(f"Rendered {result['rendered']:,} • cached {result['cached']:,} • failed {result['failed']:,}");self.refresh()
+        self.progress.setValue(self.progress.maximum());self.refresh()
+        self.status.setText(f"Complete • rendered {result['rendered']:,} • already cached {result['cached']:,} • failed {result['failed']:,} • {result['total']:,} processed")
 
 class ComparePage(QWidget):
     def __init__(self,db):
