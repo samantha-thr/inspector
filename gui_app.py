@@ -89,7 +89,7 @@ class Browser(Page):
         lo=start+1 if rows else 0; hi=start+len(rows); self.info.setText(f"Showing {lo:,}–{hi:,} of {total:,}")
 
     def open_asset(self,index):
-        item=self.table.item(index.row(),0)
+        item=self.table.item(index.row(),1)
         if item: AssetDialog(self.db,item.data(Qt.UserRole),self.kind,self).exec()
 
 class Evidence(Page):
