@@ -6,7 +6,7 @@ from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import *
 from config import APP_NAME, DATABASE_PATH, DEFAULT_SCAN_PATH
 from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_conversion_job, inspect_conversion_source, prepare_conversion_job
-from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache
+from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -208,7 +208,9 @@ class ThumbnailStudio(QWidget):
     def remove_render(self,path):
         p=cached_thumbnail(path)
         if not p:return
-        answer=QMessageBox.question(self,APP_NAME,f"Remove cached render for {Path(path).name}?\n\nThe model and database record will not be changed.",QMessageBox.Yes|QMessageBox.No)
+        answer=QMessageBox.question(self,APP_NAME,f"Remove cached render for {Path(path).name}?
+
+The model and database record will not be changed.",QMessageBox.Yes|QMessageBox.No)
         if answer==QMessageBox.Yes:
             Path(p).unlink(missing_ok=True);self.refresh()
 
@@ -327,7 +329,7 @@ class DiagnosticsPage(QWidget):
             checks.append(("Pillow","OK","Image preview engine available"))
         except Exception as e:checks.append(("Pillow","FAIL",str(e)))
         cache=Path("cache/model_thumbnails");n=len(list(cache.glob("*.png"))) if cache.exists() else 0
-        checks.append(("Visual cache","OK",f"{n:,} cached model renders"))
+        failures=thumbnail_failure_count();checks.append(("Visual cache","OK" if not failures else "WARN",f"{n:,} cached model renders • {failures:,} logged render failures"))
         try:
             self.db.db.execute("PRAGMA quick_check").fetchone();checks.append(("SQLite quick check","OK","Database responded successfully"))
         except Exception as e:checks.append(("SQLite quick check","FAIL",str(e)))
