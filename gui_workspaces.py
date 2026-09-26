@@ -164,30 +164,69 @@ class ThumbnailBatchTask(QThread):
 
 class ThumbnailStudio(QWidget):
     def __init__(self,db):
-        super().__init__();self.db=db;self.task=None;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
-        h=QLabel("Visual Library");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Build and manage cached LOD0 renders for the indexed model library."))
-        r=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Optional filename/folder/path filter");self.count=QComboBox();self.count.addItems(["25","50","100","250","500","1000"]);self.count.setCurrentText("100")
+        super().__init__();self.db=db;self.task=None;self.cards=[];b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        h=QLabel("Visual Library");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Build, browse and manage cached LOD0 renders for the indexed model library."))
+        r=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Optional filename/folder/path filter");self.search.returnPressed.connect(self.refresh)
+        self.count=QComboBox();self.count.addItems(["25","50","100","250","500","1000"]);self.count.setCurrentText("100")
+        self.view=QComboBox();self.view.addItems(["Cached only","All models","Missing renders"])
         go=QPushButton("Render Missing");go.clicked.connect(self.start);refresh=QPushButton("Refresh Gallery");refresh.clicked.connect(self.refresh)
-        for w in (self.search,QLabel("Batch"),self.count,go,refresh):r.addWidget(w)
+        for w in (self.search,QLabel("Batch"),self.count,QLabel("View"),self.view,go,refresh):r.addWidget(w)
+        self.view.currentIndexChanged.connect(self.refresh);self.count.currentIndexChanged.connect(self.refresh)
         b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.refresh()
+
+    def make_card(self,row,p):
+        card=QFrame();card.setObjectName("card");card.setMinimumWidth(225);v=QVBoxLayout(card)
+        im=QLabel();im.setAlignment(Qt.AlignCenter);im.setMinimumSize(210,170)
+        if p:
+            pix=QPixmap(str(p));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        else:im.setText("No cached render")
+        v.addWidget(im)
+        n=QLabel(row["filename"]);n.setWordWrap(True);n.setAlignment(Qt.AlignCenter);v.addWidget(n)
+        buttons=QHBoxLayout();open_b=QPushButton("Open");open_b.clicked.connect(lambda _,path=row["path"]:AssetDialog(self.db,path,"model",self).exec());buttons.addWidget(open_b)
+        if p:
+            delete=QPushButton("Remove Render");delete.clicked.connect(lambda _,path=row["path"]:self.remove_render(path));buttons.addWidget(delete)
+        else:
+            render=QPushButton("Render");render.clicked.connect(lambda _,rr=dict(row):self.render_one(rr));buttons.addWidget(render)
+        v.addLayout(buttons);return card
+
     def refresh(self):
-        rows,_=self.db.search_models_page(self.search.text().strip(),int(self.count.currentText()),0)
-        host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0
+        rows,total=self.db.search_models_page(self.search.text().strip(),int(self.count.currentText()),0)
+        host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0;cached_count=missing_count=0
+        mode=self.view.currentText()
         for row in rows:
             p=cached_thumbnail(row["path"])
-            if not p:continue
-            card=QFrame();card.setObjectName("card");v=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);pix=QPixmap(str(p));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation));v.addWidget(im)
-            n=QLabel(row["filename"]);n.setWordWrap(True);n.setAlignment(Qt.AlignCenter);v.addWidget(n);grid.addWidget(card,shown//4,shown%4);shown+=1
-        if not shown:grid.addWidget(QLabel("No cached renders in this selection yet."),0,0)
-        self.area.setWidget(host);self.status.setText(f"{shown:,} cached renders shown.")
+            if p:cached_count+=1
+            else:missing_count+=1
+            if mode=="Cached only" and not p:continue
+            if mode=="Missing renders" and p:continue
+            grid.addWidget(self.make_card(row,p),shown//4,shown%4);shown+=1
+        if not shown:grid.addWidget(QLabel("No models match this view."),0,0)
+        self.area.setWidget(host)
+        self.status.setText(f"{shown:,} shown • {cached_count:,} cached • {missing_count:,} missing in current selection • {total:,} matching models")
+
+    def remove_render(self,path):
+        p=cached_thumbnail(path)
+        if not p:return
+        answer=QMessageBox.question(self,APP_NAME,f"Remove cached render for {Path(path).name}?\n\nThe model and database record will not be changed.",QMessageBox.Yes|QMessageBox.No)
+        if answer==QMessageBox.Yes:
+            Path(p).unlink(missing_ok=True);self.refresh()
+
+    def render_one(self,row):
+        links=self.db.links_for_model(row["path"],100);textures=[x["texture_path"] for x in links if x["texture_path"]]
+        self.progress.setRange(0,1);self.progress.setValue(0);self.status.setText(f"Rendering {row['filename']}…")
+        self.task=ThumbnailBatchTask([(row,textures)],False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
+
     def start(self):
         rows,_=self.db.search_models_page(self.search.text().strip(),int(self.count.currentText()),0)
         if not rows:return
         items=[]
         for row in rows:
+            if cached_thumbnail(row["path"]):continue
             links=self.db.links_for_model(row["path"],100);items.append((dict(row),[x["texture_path"] for x in links if x["texture_path"]]))
-        self.progress.setRange(0,len(items));self.progress.setValue(0);self.status.setText(f"Starting batch of {len(items):,} models…")
+        if not items:
+            self.status.setText("All models in this batch already have cached renders.");return
+        self.progress.setRange(0,len(items));self.progress.setValue(0);self.status.setText(f"Starting {len(items):,} missing renders…")
         self.task=ThumbnailBatchTask(items,False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,name):
         self.progress.setValue(i);self.status.setText(f"Rendering {i:,} / {total:,} • {name}")
