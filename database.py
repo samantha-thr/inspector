@@ -251,6 +251,35 @@ class Database:
             :analysis_status,:is_dds,:dds_width,:dds_height,:dds_mipmaps,:dds_fourcc,:dds_format,:dds_rgb_bits,:dds_has_alpha,:dds_is_cubemap,:dds_is_volume,:dds_estimated_vram,:dds_header_status,:last_scanned)
         """, row)
 
+    # scanner compatibility / aggregate helpers
+    def get_existing_map(self):
+        return self.existing_models()
+
+    def get_existing_texture_map(self):
+        return self.existing_textures()
+
+    def duplicate_hash_count(self):
+        return self.db.execute(
+            "SELECT COUNT(*) FROM (SELECT sha256 FROM models WHERE sha256!='' GROUP BY sha256 HAVING COUNT(*)>1)"
+        ).fetchone()[0]
+
+    def filename_type_counts(self):
+        return self.db.execute(
+            "SELECT filename_type, COUNT(*) count FROM models GROUP BY filename_type ORDER BY count DESC"
+        ).fetchall()
+
+    def som_version_counts(self):
+        return self.db.execute(
+            "SELECT som_version, COUNT(*) count FROM models GROUP BY som_version ORDER BY count DESC"
+        ).fetchall()
+
+    def size_stats(self):
+        row = self.db.execute(
+            "SELECT COUNT(*) count, COALESCE(MIN(size),0) min_size, COALESCE(MAX(size),0) max_size, "
+            "COALESCE(AVG(size),0) avg_size, COALESCE(SUM(size),0) total_size FROM models"
+        ).fetchone()
+        return dict(row)
+
     # stats
     def count_models(self):
         return self.db.execute("SELECT COUNT(*) FROM models").fetchone()[0]

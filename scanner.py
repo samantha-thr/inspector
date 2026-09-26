@@ -108,6 +108,7 @@ def scan_folder(
                     "printable_ratio": info.get("printable_ratio", 0.0),
                     "zero_ratio": info.get("zero_ratio", 0.0),
                     "sample_strings": info.get("sample_strings", ""),
+                    "string_fingerprint": info.get("string_fingerprint", ""),
                     "last_scanned": time.time(),
                 })
                 scanned += 1
