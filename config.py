@@ -1,5 +1,5 @@
 from __future__ import annotations
-from pathlib import Path
+from pathlib import Path\nimport os
 
 APP_NAME = "There Inspector"
 VERSION = "3.0.0-dev1"
