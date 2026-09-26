@@ -240,7 +240,8 @@ class MainWindow(QMainWindow):
         db_label=QLabel("Database" + chr(10) + str(DATABASE_PATH)); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
         sb.addWidget(db_label); shell.addWidget(side)
         self.stack=QStackedWidget()
-        pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),ReviewQueue(self.db),\n               ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),SettingsPage()]
+        pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),ReviewQueue(self.db),
+               ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),SettingsPage()]
         for p in pages:self.stack.addWidget(p)
         shell.addWidget(self.stack,1); self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
     def refresh_all(self):
