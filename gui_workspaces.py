@@ -89,7 +89,8 @@ class AssetDialog(QDialog):
         hist=QListWidget()
         for n in db.notes_for_asset(row["path"],25):hist.addItem(str(n["note"]))
         vb.addWidget(hist,1);save=QPushButton("Save Review");save.clicked.connect(lambda:self.save(row["path"]));vb.addWidget(save);tabs.addTab(review,"Review")
-        close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(self.reject);box.addWidget(close)
+        actions=QHBoxLayout(); show=QPushButton("Show File in Explorer"); show.clicked.connect(lambda:reveal(row["path"])); actions.addWidget(show); actions.addStretch()
+        close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(self.reject);actions.addWidget(close);box.addLayout(actions)
     def save(self,path):
         self.db.set_asset_review(path,self.status.currentText(),self.priority.currentText())
         old=set(self.db.tags_for_asset(path));new={x.strip().lower() for x in self.tags.text().split(",") if x.strip()}
