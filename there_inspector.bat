@@ -1,3 +1,3 @@
 @echo off
-python there_inspector.py
+python there_inspector_gui.py
 pause
