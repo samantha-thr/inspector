@@ -151,12 +151,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} 3.0 GUI Preview"); self.resize(1450,900); self.setMinimumSize(1050,680)
         root=QWidget(); self.setCentralWidget(root); shell=QHBoxLayout(root); shell.setContentsMargins(0,0,0,0); shell.setSpacing(0)
         side=QFrame(); side.setObjectName("sidebar"); side.setFixedWidth(230); sb=QVBoxLayout(side); sb.setContentsMargins(18,22,18,18)
-        brand=QLabel("THERE\\nINSPECTOR"); brand.setObjectName("brand"); sb.addWidget(brand)
+        brand=QLabel("THERE" + chr(10) + "INSPECTOR"); brand.setObjectName("brand"); sb.addWidget(brand)
         sub=QLabel("Asset Intelligence Suite"); sub.setObjectName("muted"); sb.addWidget(sub); sb.addSpacing(20)
         self.nav=QListWidget(); self.nav.setObjectName("nav")
         names=["Dashboard","Models","Textures","Evidence","Compare","Convert","Knowledge","Scan & Analysis","Settings"]
         self.nav.addItems(names); self.nav.setCurrentRow(0); sb.addWidget(self.nav,1)
-        db_label=QLabel(f"Database\\n{DATABASE_PATH}"); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
+        db_label=QLabel("Database" + chr(10) + str(DATABASE_PATH)); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
         sb.addWidget(db_label); shell.addWidget(side)
         self.stack=QStackedWidget()
         pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),
