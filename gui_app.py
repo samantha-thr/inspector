@@ -98,17 +98,13 @@ class Browser(Page):
         path=item.data(Qt.UserRole)
         if self.kind=="texture":
             pix=texture_pixmap(path,300,300)
-            if pix.isNull():self.preview.setText(Path(path).name+"
-
-Preview unavailable")
+            if pix.isNull():self.preview.setText(Path(path).name + chr(10) + chr(10) + "Preview unavailable")
             else:self.preview.setPixmap(pix);self.preview.setToolTip(Path(path).name)
         else:
             p=cached_thumbnail(path,512)
             if p:
                 pix=QPixmap(str(p));self.preview.setPixmap(pix.scaled(300,300,Qt.KeepAspectRatio,Qt.SmoothTransformation))
-            else:self.preview.setText(Path(path).name+"
-
-Double-click → Model Render → Generate to cache a visual thumbnail.")
+            else:self.preview.setText(Path(path).name + chr(10) + chr(10) + "Double-click → Model Render → Generate to cache a visual thumbnail.")
 
     def open_asset(self,index):
         item=self.table.item(index.row(),1)
