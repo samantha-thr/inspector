@@ -7,6 +7,7 @@ from there_model_decoder import decode_model, export_obj
 
 CACHE_DIR=PROJECT_DIR/"cache"/"model_thumbnails"
 WORK_DIR=PROJECT_DIR/"cache"/"thumbnail_work"
+FAILURE_LOG=PROJECT_DIR/"cache"/"thumbnail_failures.jsonl"
 
 def thumbnail_key(model_path):
     p=Path(model_path)
@@ -76,8 +77,22 @@ def render_model_thumbnail(model_path,linked_textures=None,size=512,force=False)
     export_obj(decoded,obj,linked_textures or [],include_collision=False)
     script=_script(obj,out,size)
     proc=subprocess.run([blender,"--background","--factory-startup","--python",str(script)],capture_output=True,text=True,timeout=180)
-    log=(proc.stdout or "")+"\n"+(proc.stderr or "")
-    return {"success":proc.returncode==0 and out.exists(),"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:]}
+    log=(proc.stdout or "")+"\
+"+(proc.stderr or "")
+    success=proc.returncode==0 and out.exists()
+    if not success:log_thumbnail_failure(model_path,log[-4000:] or "Render failed",proc.returncode)
+    return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:]}
+
+def log_thumbnail_failure(model_path,message,returncode=None):
+    FAILURE_LOG.parent.mkdir(parents=True,exist_ok=True)
+    record={"time":time.time(),"model":str(model_path),"returncode":returncode,"message":str(message)[-4000:]}
+    with FAILURE_LOG.open("a",encoding="utf-8") as fh:fh.write(json.dumps(record,ensure_ascii=False)+"\
+")
+
+def thumbnail_failure_count():
+    if not FAILURE_LOG.exists():return 0
+    try:return sum(1 for x in FAILURE_LOG.read_text(encoding="utf-8").splitlines() if x.strip())
+    except Exception:return 0
 
 def purge_thumbnail_cache():
     removed=0
