@@ -2,12 +2,14 @@ from __future__ import annotations
 import sys
 import time
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSettings
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import *
 from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
 from scanner import scan_folder, scan_textures
 from analysis_engine import rebuild_links, rebuild_families, rebuild_texture_families, rebuild_evidence, rebuild_texture_evidence
 from database import Database
 from gui_workspaces import AssetDialog, ComparePage, ConvertPage, KnowledgePage, SettingsPage
+from model_thumbnail import cached_thumbnail
 
 BG="#101215"; PANEL="#181b20"; CYAN="#43e8e8"; TEXT="#e8eaed"; MUTED="#8f98a3"
 
@@ -55,8 +57,8 @@ class Browser(Page):
         b=QPushButton("Search"); b.clicked.connect(self.reset_search); self.search.returnPressed.connect(self.reset_search)
         self.limit=QComboBox(); self.limit.addItems(["250","500","1000","2500","5000"]); self.limit.setCurrentText("1000")
         row.addWidget(self.search,1); row.addWidget(QLabel("Rows")); row.addWidget(self.limit); row.addWidget(b); self.box.addLayout(row)
-        self.table=QTableWidget(0,5); self.table.setHorizontalHeaderLabels(["Filename","Folder","Path","Details","Status"]); self.table.setSortingEnabled(True)
-        self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table=QTableWidget(0,6); self.table.setHorizontalHeaderLabels(["Preview","Filename","Folder","Path","Details","Status"]); self.table.setSortingEnabled(True)
+        self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.Stretch); self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.doubleClicked.connect(self.open_asset); self.box.addWidget(self.table,1)
         nav=QHBoxLayout(); self.prev=QPushButton("Previous"); self.next=QPushButton("Next"); self.info=QLabel("")
         self.prev.clicked.connect(lambda:self.change_page(-1)); self.next.clicked.connect(lambda:self.change_page(1))
@@ -72,10 +74,17 @@ class Browser(Page):
         has_next=start+len(rows)<total
         self.table.setRowCount(len(rows))
         for r,x in enumerate(rows):
-            if self.kind=="model": vals=(x["filename"],x["folder"],x["relative_path"],f"{int(x['size'] or 0):,} bytes",(x["sha256"] or "")[:16])
-            else: vals=(x["filename"],x["folder"],x["relative_path"],f"{x['width'] or x['dds_width'] or 0} x {x['height'] or x['dds_height'] or 0}",x["dds_format"] or x["analysis_status"])
-            for col,v in enumerate(vals): self.table.setItem(r,col,QTableWidgetItem(str(v or "")))
-            self.table.item(r,0).setData(Qt.UserRole,x["path"])
+            preview=QTableWidgetItem()
+            if self.kind=="model":
+                p=cached_thumbnail(x["path"],512)
+                if p: preview.setIcon(QPixmap(str(p))); preview.setToolTip("Cached LOD0 render")
+                vals=(x["filename"],x["folder"],x["relative_path"],f"{int(x['size'] or 0):,} bytes",(x["sha256"] or "")[:16])
+            else:
+                vals=(x["filename"],x["folder"],x["relative_path"],f"{x['width'] or x['dds_width'] or 0} x {x['height'] or x['dds_height'] or 0}",x["dds_format"] or x["analysis_status"])
+            self.table.setItem(r,0,preview)
+            for col,v in enumerate(vals,1): self.table.setItem(r,col,QTableWidgetItem(str(v or "")))
+            self.table.item(r,1).setData(Qt.UserRole,x["path"])
+            self.table.setRowHeight(r,56)
         self.prev.setEnabled(self.page>0); self.next.setEnabled(has_next)
         lo=start+1 if rows else 0; hi=start+len(rows); self.info.setText(f"Showing {lo:,}–{hi:,} of {total:,}")
 
