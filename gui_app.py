@@ -32,7 +32,8 @@ class Dashboard(Page):
         self.box.addLayout(row)
         self.table=QTableWidget(0,4); self.table.setHorizontalHeaderLabels(["Score","Asset A","Asset B","Reasons"])
         for i in (1,2,3): self.table.horizontalHeader().setSectionResizeMode(i,QHeaderView.Stretch)
-        self.box.addWidget(self.table,1); self.refresh()
+        self.box.addWidget(self.table,1)
+        self.scan_status=QLabel(""); self.scan_status.setObjectName("muted"); self.box.addWidget(self.scan_status); self.refresh()
     def refresh(self):
         s=self.db.relationship_stats()
         rc=self.db.review_counts(); vals=[self.db.count_models(),self.db.count_textures(),s.get("evidence_pairs",0)+s.get("texture_evidence_pairs",0),sum(v for k,v in rc.items() if k not in ("reviewed","dismissed"))]
@@ -41,6 +42,10 @@ class Dashboard(Page):
         for r,x in enumerate(rows):
             for c,v in enumerate((x["overall_score"],x["path_a"],x["path_b"],x["reasons"])):
                 self.table.setItem(r,c,QTableWidgetItem(str(v or "")))
+        scans=self.db.recent_scan_history(1)
+        if scans:
+            x=scans[0]; self.scan_status.setText(f"Last {x['scan_type']} scan • found {int(x['found'] or 0):,} • scanned {int(x['scanned'] or 0):,} • skipped {int(x['skipped'] or 0):,} • errors {int(x['errors'] or 0):,} • {float(x['elapsed'] or 0):,.1f}s")
+        else:self.scan_status.setText("No scan history recorded yet.")
 
 class Browser(Page):
     def __init__(self,db,kind):
@@ -81,25 +86,29 @@ class Browser(Page):
 class Evidence(Page):
     def __init__(self,db):
         super().__init__("Evidence","Review model and texture similarity candidates"); self.db=db
-        self.mode=QComboBox(); self.mode.addItems(["Model Evidence","Texture Evidence"]); self.mode.currentIndexChanged.connect(self.refresh); self.box.addWidget(self.mode)
-        self.table=QTableWidget(0,5); self.table.setHorizontalHeaderLabels(["Score","Asset A","Asset B","Type","Reasons"])
+        controls=QHBoxLayout(); self.mode=QComboBox(); self.mode.addItems(["Model Evidence","Texture Evidence"])
+        self.minimum=QSpinBox(); self.minimum.setRange(0,100); self.minimum.setValue(50); self.limit=QComboBox(); self.limit.addItems(["250","500","1000","2500"]); self.limit.setCurrentText("1000")
+        refresh=QPushButton("Refresh")
+        for w in (self.mode,self.minimum,self.limit): 
+            if hasattr(w,"currentIndexChanged"): w.currentIndexChanged.connect(self.refresh)
+        self.minimum.valueChanged.connect(self.refresh); refresh.clicked.connect(self.refresh)
+        controls.addWidget(self.mode); controls.addWidget(QLabel("Min score")); controls.addWidget(self.minimum); controls.addWidget(QLabel("Rows")); controls.addWidget(self.limit); controls.addStretch(); controls.addWidget(refresh); self.box.addLayout(controls)
+        self.table=QTableWidget(0,5); self.table.setHorizontalHeaderLabels(["Score","Asset A","Asset B","Type","Reasons"]); self.table.setSortingEnabled(True)
         for i in (1,2,4): self.table.horizontalHeader().setSectionResizeMode(i,QHeaderView.Stretch)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.doubleClicked.connect(self.open_evidence_asset)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.doubleClicked.connect(self.open_evidence_asset)
         self.box.addWidget(self.table,1); self.refresh()
     def refresh(self):
-        rows=self.db.top_evidence(200) if self.mode.currentIndex()==0 else self.db.top_texture_evidence(200)
-        self.table.setRowCount(len(rows))
+        limit=int(self.limit.currentText()); rows=self.db.top_evidence(limit) if self.mode.currentIndex()==0 else self.db.top_texture_evidence(limit)
+        rows=[x for x in rows if int(x["overall_score"] or 0)>=self.minimum.value()]
+        self.table.setSortingEnabled(False); self.table.setRowCount(len(rows))
         for r,x in enumerate(rows):
-            for c,v in enumerate((x["overall_score"],x["path_a"],x["path_b"],x["evidence_type"],x["reasons"])):
-                self.table.setItem(r,c,QTableWidgetItem(str(v or "")))
+            for col,v in enumerate((x["overall_score"],x["path_a"],x["path_b"],x["evidence_type"],x["reasons"])):self.table.setItem(r,col,QTableWidgetItem(str(v or "")))
             self.table.item(r,1).setData(Qt.UserRole,x["path_a"]); self.table.item(r,2).setData(Qt.UserRole,x["path_b"])
-
+        self.table.setSortingEnabled(True)
     def open_evidence_asset(self,index):
         col=1 if index.column()!=2 else 2; item=self.table.item(index.row(),col)
         if item:
-            kind="model" if self.mode.currentIndex()==0 else "texture"
-            AssetDialog(self.db,item.data(Qt.UserRole),kind,self).exec()
+            kind="model" if self.mode.currentIndex()==0 else "texture"; AssetDialog(self.db,item.data(Qt.UserRole),kind,self).exec()
 
 class ReviewQueue(Page):
     def __init__(self,db):
