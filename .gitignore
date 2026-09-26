@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local Inspector data
+database/*.db
+database/*.db-wal
+database/*.db-shm
+database/*.sqlite
+database/*.sqlite3
+
+# Generated analysis / conversion output
+reports/
+logs/
+conversions/
