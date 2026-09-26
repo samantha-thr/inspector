@@ -270,6 +270,30 @@ class KnowledgePage(QWidget):
     def add(self):
         if self.type.text().strip() and self.key.text().strip():self.db.upsert_knowledge_rule(self.type.text().strip(),self.key.text().strip(),self.value.text().strip(),source="GUI");self.refresh()
 
+class DiagnosticsPage(QWidget):
+    def __init__(self,db):
+        super().__init__();self.db=db;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        h=QLabel("Diagnostics");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Environment, database and rendering readiness checks"))
+        self.table=QTableWidget(0,3);self.table.setHorizontalHeaderLabels(["Check","Status","Details"]);self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch);b.addWidget(self.table,1)
+        r=QHBoxLayout();run=QPushButton("Run Checks");run.clicked.connect(self.refresh);r.addWidget(run);r.addStretch();b.addLayout(r);self.refresh()
+    def refresh(self):
+        checks=[]
+        checks.append(("Database","OK" if Path(DATABASE_PATH).exists() else "WARN",f"{DATABASE_PATH} • {self.db.count_models():,} models • {self.db.count_textures():,} textures"))
+        ready=conversion_readiness();checks.append(("Native decoder","OK" if ready.geometry_decoder_available else "FAIL",ready.geometry_decoder_name))
+        checks.append(("Blender","OK" if ready.blender_found else "WARN",ready.blender_path or "Not detected; model renders and BLEND/GLB conversion unavailable"))
+        try:
+            from PIL import features
+            checks.append(("Pillow","OK","Image preview engine available"))
+        except Exception as e:checks.append(("Pillow","FAIL",str(e)))
+        cache=Path("cache/model_thumbnails");n=len(list(cache.glob("*.png"))) if cache.exists() else 0
+        checks.append(("Visual cache","OK",f"{n:,} cached model renders"))
+        try:
+            self.db.db.execute("PRAGMA quick_check").fetchone();checks.append(("SQLite quick check","OK","Database responded successfully"))
+        except Exception as e:checks.append(("SQLite quick check","FAIL",str(e)))
+        self.table.setRowCount(len(checks))
+        for i,row in enumerate(checks):
+            for j,v in enumerate(row):self.table.setItem(i,j,QTableWidgetItem(str(v)))
+
 class SettingsPage(QWidget):
     def __init__(self,db=None):
         super().__init__();self.db=db;self.settings=QSettings("ThereInspector","ThereInspector");b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Settings");h.setObjectName("title");b.addWidget(h);f=QFormLayout();self.resource=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH));self.blender=QLineEdit(self.settings.value("blender_path",""));f.addRow("Resource folder",self.resource);f.addRow("Blender executable",self.blender);f.addRow("Database",QLabel(str(DATABASE_PATH)));b.addLayout(f);buttons=QHBoxLayout();save=QPushButton("Save Settings");save.clicked.connect(self.save);export=QPushButton("Export Diagnostic Snapshot");export.clicked.connect(self.export_snapshot);clear=QPushButton("Clear Model Thumbnail Cache");clear.clicked.connect(self.clear_cache);buttons.addWidget(save);buttons.addWidget(export);buttons.addWidget(clear);buttons.addStretch();b.addLayout(buttons);b.addStretch()
