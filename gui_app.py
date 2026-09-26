@@ -50,7 +50,7 @@ class Browser(Page):
         b=QPushButton("Search"); b.clicked.connect(self.reset_search); self.search.returnPressed.connect(self.reset_search)
         self.limit=QComboBox(); self.limit.addItems(["250","500","1000","2500","5000"]); self.limit.setCurrentText("1000")
         row.addWidget(self.search,1); row.addWidget(QLabel("Rows")); row.addWidget(self.limit); row.addWidget(b); self.box.addLayout(row)
-        self.table=QTableWidget(0,5); self.table.setHorizontalHeaderLabels(["Filename","Folder","Path","Details","Status"])
+        self.table=QTableWidget(0,5); self.table.setHorizontalHeaderLabels(["Filename","Folder","Path","Details","Status"]); self.table.setSortingEnabled(True)
         self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers); self.table.doubleClicked.connect(self.open_asset); self.box.addWidget(self.table,1)
         nav=QHBoxLayout(); self.prev=QPushButton("Previous"); self.next=QPushButton("Next"); self.info=QLabel("")
@@ -62,9 +62,7 @@ class Browser(Page):
 
     def refresh(self):
         q=self.search.text().strip(); limit=int(self.limit.currentText())
-        fetch=(self.page+1)*limit+1
-        allrows=self.db.search_models(q,fetch) if self.kind=="model" else self.db.search_textures(q,fetch)
-        start=self.page*limit; rows=allrows[start:start+limit]; has_next=len(allrows)>start+limit
+        start=self.page*limit\n        rows,total=self.db.search_models_page(q,limit,start) if self.kind=="model" else self.db.search_textures_page(q,limit,start)\n        has_next=start+len(rows)<total
         self.table.setRowCount(len(rows))
         for r,x in enumerate(rows):
             if self.kind=="model": vals=(x["filename"],x["folder"],x["relative_path"],f"{int(x['size'] or 0):,} bytes",(x["sha256"] or "")[:16])
@@ -72,7 +70,7 @@ class Browser(Page):
             for col,v in enumerate(vals): self.table.setItem(r,col,QTableWidgetItem(str(v or "")))
             self.table.item(r,0).setData(Qt.UserRole,x["path"])
         self.prev.setEnabled(self.page>0); self.next.setEnabled(has_next)
-        lo=start+1 if rows else 0; hi=start+len(rows); self.info.setText(f"Showing {lo:,}–{hi:,}" + (" • more available" if has_next else ""))
+        lo=start+1 if rows else 0; hi=start+len(rows); self.info.setText(f"Showing {lo:,}–{hi:,} of {total:,}")
 
     def open_asset(self,index):
         item=self.table.item(index.row(),0)
