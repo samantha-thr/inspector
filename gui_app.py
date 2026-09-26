@@ -62,7 +62,9 @@ class Browser(Page):
 
     def refresh(self):
         q=self.search.text().strip(); limit=int(self.limit.currentText())
-        start=self.page*limit\n        rows,total=self.db.search_models_page(q,limit,start) if self.kind=="model" else self.db.search_textures_page(q,limit,start)\n        has_next=start+len(rows)<total
+        start=self.page*limit
+        rows,total=self.db.search_models_page(q,limit,start) if self.kind=="model" else self.db.search_textures_page(q,limit,start)
+        has_next=start+len(rows)<total
         self.table.setRowCount(len(rows))
         for r,x in enumerate(rows):
             if self.kind=="model": vals=(x["filename"],x["folder"],x["relative_path"],f"{int(x['size'] or 0):,} bytes",(x["sha256"] or "")[:16])
