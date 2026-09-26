@@ -1,0 +1,122 @@
+from __future__ import annotations
+import sys
+from PySide6.QtWidgets import *
+from config import APP_NAME, DEFAULT_SCAN_PATH, VERSION
+from database import Database
+
+BG="#101215"; PANEL="#181b20"; CYAN="#43e8e8"; TEXT="#e8eaed"; MUTED="#8f98a3"
+
+class Page(QWidget):
+    def __init__(self,title,subtitle=""):
+        super().__init__()
+        self.box=QVBoxLayout(self); self.box.setContentsMargins(28,24,28,24)
+        h=QLabel(title); h.setObjectName("title"); self.box.addWidget(h)
+        s=QLabel(subtitle); s.setObjectName("muted"); self.box.addWidget(s)
+
+class Card(QFrame):
+    def __init__(self,title):
+        super().__init__(); self.setObjectName("card")
+        b=QVBoxLayout(self); t=QLabel(title.upper()); t.setObjectName("muted"); b.addWidget(t)
+        self.value=QLabel("0"); self.value.setObjectName("metric"); b.addWidget(self.value)
+
+class Dashboard(Page):
+    def __init__(self,db):
+        super().__init__("Dashboard","Asset intelligence overview"); self.db=db
+        row=QHBoxLayout(); self.cards=[Card(x) for x in ("Models","Textures","Model Families","Evidence")]
+        for c in self.cards: row.addWidget(c)
+        self.box.addLayout(row)
+        self.table=QTableWidget(0,4); self.table.setHorizontalHeaderLabels(["Score","Asset A","Asset B","Reasons"])
+        for i in (1,2,3): self.table.horizontalHeader().setSectionResizeMode(i,QHeaderView.Stretch)
+        self.box.addWidget(self.table,1); self.refresh()
+    def refresh(self):
+        s=self.db.relationship_stats()
+        vals=[self.db.count_models(),self.db.count_textures(),s.get("families",0),s.get("evidence_pairs",0)+s.get("texture_evidence_pairs",0)]
+        for c,v in zip(self.cards,vals): c.value.setText(f"{int(v or 0):,}")
+        rows=self.db.top_evidence(30); self.table.setRowCount(len(rows))
+        for r,x in enumerate(rows):
+            for c,v in enumerate((x["overall_score"],x["path_a"],x["path_b"],x["reasons"])):
+                self.table.setItem(r,c,QTableWidgetItem(str(v or "")))
+
+class Browser(Page):
+    def __init__(self,db,kind):
+        title="Models" if kind=="model" else "Textures"
+        super().__init__(title,"Search and inspect indexed assets"); self.db=db; self.kind=kind
+        row=QHBoxLayout(); self.search=QLineEdit(); self.search.setPlaceholderText("Filename, folder, path or hash")
+        b=QPushButton("Search"); b.clicked.connect(self.refresh); self.search.returnPressed.connect(self.refresh)
+        row.addWidget(self.search,1); row.addWidget(b); self.box.addLayout(row)
+        self.table=QTableWidget(0,5)
+        self.table.setHorizontalHeaderLabels(["Filename","Folder","Path","Details","Status"])
+        self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.box.addWidget(self.table,1); self.refresh()
+    def refresh(self):
+        q=self.search.text().strip()
+        rows=self.db.search_models(q,250) if self.kind=="model" else self.db.search_textures(q,250)
+        self.table.setRowCount(len(rows))
+        for r,x in enumerate(rows):
+            if self.kind=="model": vals=(x["filename"],x["folder"],x["relative_path"],f"{int(x['size'] or 0):,} bytes",(x["sha256"] or "")[:16])
+            else: vals=(x["filename"],x["folder"],x["relative_path"],f"{x['width'] or x['dds_width'] or 0} x {x['height'] or x['dds_height'] or 0}",x["dds_format"] or x["analysis_status"])
+            for c,v in enumerate(vals): self.table.setItem(r,c,QTableWidgetItem(str(v or "")))
+
+class Evidence(Page):
+    def __init__(self,db):
+        super().__init__("Evidence","Review model and texture similarity candidates"); self.db=db
+        self.mode=QComboBox(); self.mode.addItems(["Model Evidence","Texture Evidence"]); self.mode.currentIndexChanged.connect(self.refresh); self.box.addWidget(self.mode)
+        self.table=QTableWidget(0,5); self.table.setHorizontalHeaderLabels(["Score","Asset A","Asset B","Type","Reasons"])
+        for i in (1,2,4): self.table.horizontalHeader().setSectionResizeMode(i,QHeaderView.Stretch)
+        self.box.addWidget(self.table,1); self.refresh()
+    def refresh(self):
+        rows=self.db.top_evidence(200) if self.mode.currentIndex()==0 else self.db.top_texture_evidence(200)
+        self.table.setRowCount(len(rows))
+        for r,x in enumerate(rows):
+            for c,v in enumerate((x["overall_score"],x["path_a"],x["path_b"],x["evidence_type"],x["reasons"])):
+                self.table.setItem(r,c,QTableWidgetItem(str(v or "")))
+
+class Placeholder(Page):
+    def __init__(self,title,subtitle):
+        super().__init__(title,subtitle)
+        c=QFrame(); c.setObjectName("card"); b=QVBoxLayout(c)
+        x=QLabel("Foundation ready"); x.setObjectName("metric"); b.addWidget(x)
+        d=QLabel("This workspace is connected to the 3.0 application shell and is ready for the next implementation pass."); d.setWordWrap(True); b.addWidget(d); b.addStretch()
+        self.box.addWidget(c,1)
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__(); self.db=Database()
+        self.setWindowTitle(f"{APP_NAME} 3.0 GUI Preview"); self.resize(1450,900); self.setMinimumSize(1050,680)
+        root=QWidget(); self.setCentralWidget(root); shell=QHBoxLayout(root); shell.setContentsMargins(0,0,0,0); shell.setSpacing(0)
+        side=QFrame(); side.setObjectName("sidebar"); side.setFixedWidth(230); sb=QVBoxLayout(side); sb.setContentsMargins(18,22,18,18)
+        brand=QLabel("THERE\nINSPECTOR"); brand.setObjectName("brand"); sb.addWidget(brand)
+        sub=QLabel("Asset Intelligence Suite"); sub.setObjectName("muted"); sb.addWidget(sub); sb.addSpacing(20)
+        self.nav=QListWidget(); self.nav.setObjectName("nav")
+        names=["Dashboard","Models","Textures","Evidence","Compare","Convert","Knowledge","Scan & Analysis","Settings"]
+        self.nav.addItems(names); self.nav.setCurrentRow(0); sb.addWidget(self.nav,1); shell.addWidget(side)
+        self.stack=QStackedWidget()
+        pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),Evidence(self.db),
+               Placeholder("Compare","Side-by-side visual comparison"),Placeholder("Convert","There model conversion and Blender export"),
+               Placeholder("Knowledge","Rules, templates and learned context"),Placeholder("Scan & Analysis","Background scan and analysis controls"),
+               Placeholder("Settings","Paths, thresholds, Blender and performance")]
+        for p in pages:self.stack.addWidget(p)
+        shell.addWidget(self.stack,1); self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+    def closeEvent(self,event):
+        self.db.close(); super().closeEvent(event)
+
+STYLE=f"""
+QWidget{{background:{BG};color:{TEXT};font-family:'Segoe UI';font-size:10pt}}
+QFrame#sidebar{{background:#0c0e11;border-right:1px solid #282d34}}
+QLabel#brand{{color:{CYAN};font-size:21pt;font-weight:800;letter-spacing:2px}}
+QLabel#title{{font-size:24pt;font-weight:700;color:white}}
+QLabel#muted{{color:{MUTED}}} QLabel#metric{{font-size:23pt;font-weight:700;color:white}}
+QFrame#card{{background:{PANEL};border:1px solid #2b3038;border-radius:10px}}
+QListWidget#nav{{background:transparent;border:0;outline:0}}
+QListWidget#nav::item{{padding:12px;margin:2px;border-radius:7px;color:#b8c0ca}}
+QListWidget#nav::item:selected{{background:#16383c;color:{CYAN};font-weight:700}}
+QLineEdit,QComboBox{{background:{PANEL};border:1px solid #343b45;border-radius:6px;padding:8px}}
+QPushButton{{background:#243038;color:{CYAN};border:1px solid #31515a;border-radius:6px;padding:8px 14px;font-weight:600}}
+QTableWidget{{background:{PANEL};border:1px solid #2b3038;gridline-color:#292e35}}
+QHeaderView::section{{background:#20252b;color:#aeb6c0;border:0;padding:8px;font-weight:700}}
+"""
+
+def main():
+    app=QApplication(sys.argv); app.setApplicationName(APP_NAME); app.setStyle("Fusion"); app.setStyleSheet(STYLE)
+    window=MainWindow(); window.show(); return app.exec()
+
+if __name__=="__main__": raise SystemExit(main())
