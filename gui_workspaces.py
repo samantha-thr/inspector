@@ -2,9 +2,22 @@ from __future__ import annotations
 import json, os, subprocess
 from pathlib import Path
 from PySide6.QtCore import Qt, QSettings, QThread, Signal
+from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import *
 from config import APP_NAME, DATABASE_PATH, DEFAULT_SCAN_PATH
 from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_conversion_job, inspect_conversion_source, prepare_conversion_job
+
+def texture_pixmap(path, max_w=560, max_h=440):
+    try:
+        from PIL import Image
+        img=Image.open(path); img.load(); rgba=img.convert("RGBA")
+        data=rgba.tobytes("raw","RGBA")
+        q=QImage(data,rgba.width,rgba.height,QImage.Format_RGBA8888).copy()
+        return QPixmap.fromImage(q).scaled(max_w,max_h,Qt.KeepAspectRatio,Qt.SmoothTransformation)
+    except Exception:
+        pix=QPixmap(str(path))
+        if not pix.isNull(): return pix.scaled(max_w,max_h,Qt.KeepAspectRatio,Qt.SmoothTransformation)
+    return QPixmap()
 
 def reveal(p):
     try: subprocess.Popen(["explorer","/select,",str(Path(p))]) if os.name=="nt" else None
@@ -24,6 +37,14 @@ class AssetDialog(QDialog):
         if not row: box.addWidget(QLabel("Asset not found.")); return
         h=QLabel(row["filename"]); h.setObjectName("title"); box.addWidget(h); box.addWidget(QLabel(row["relative_path"]))
         tabs=QTabWidget(); box.addWidget(tabs,1)
+        if kind=="texture":
+            preview=QWidget(); pv=QVBoxLayout(preview); image=QLabel(); image.setAlignment(Qt.AlignCenter); image.setMinimumSize(500,380)
+            pix=texture_pixmap(row["path"])
+            if pix.isNull(): image.setText("Preview unavailable for this texture format.")
+            else: image.setPixmap(pix)
+            pv.addWidget(image,1)
+            meta=QLabel(f"{row['width'] or row['dds_width'] or 0} × {row['height'] or row['dds_height'] or 0}   •   {row['dds_format'] or row['extension']}   •   {int(row['size'] or 0):,} bytes")
+            meta.setAlignment(Qt.AlignCenter); pv.addWidget(meta); tabs.addTab(preview,"Preview")
         over=QWidget(); form=QFormLayout(over)
         keys=["folder","size","sha256","som_version","filename_type"] if kind=="model" else ["folder","size","sha256","width","height","dds_format","analysis_status","ahash"]
         for k in keys:
