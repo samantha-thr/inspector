@@ -8,6 +8,8 @@ from there_model_decoder import decode_model, export_obj
 CACHE_DIR=PROJECT_DIR/"cache"/"model_thumbnails"
 WORK_DIR=PROJECT_DIR/"cache"/"thumbnail_work"
 FAILURE_LOG=PROJECT_DIR/"cache"/"thumbnail_failures.jsonl"
+METADATA_DIR=PROJECT_DIR/"cache"/"model_thumbnail_meta"
+RENDER_VERSION=2
 
 def thumbnail_key(model_path):
     p=Path(model_path)
@@ -88,6 +90,30 @@ def log_thumbnail_failure(model_path,message,returncode=None):
     record={"time":time.time(),"model":str(model_path),"returncode":returncode,"message":str(message)[-4000:]}
     with FAILURE_LOG.open("a",encoding="utf-8") as fh:fh.write(json.dumps(record,ensure_ascii=False)+"\
 ")
+
+def thumbnail_failures(unresolved_only=True):
+    if not FAILURE_LOG.exists():return []
+    latest={}
+    try:
+        for line in FAILURE_LOG.read_text(encoding="utf-8").splitlines():
+            if not line.strip():continue
+            r=json.loads(line); latest[r.get("model","")]=r
+    except Exception:return []
+    rows=sorted(latest.values(),key=lambda x:x.get("time",0),reverse=True)
+    if unresolved_only:rows=[r for r in rows if r.get("model") and not cached_thumbnail(r["model"])]
+    return rows
+
+def clear_thumbnail_failure(model_path):
+    if not FAILURE_LOG.exists():return
+    keep=[]
+    for line in FAILURE_LOG.read_text(encoding="utf-8").splitlines():
+        try:
+            r=json.loads(line)
+            if r.get("model")!=str(model_path):keep.append(line)
+        except Exception:keep.append(line)
+    FAILURE_LOG.write_text(("\
+".join(keep)+"\
+") if keep else "",encoding="utf-8")
 
 def thumbnail_failure_count():
     if not FAILURE_LOG.exists():return 0
