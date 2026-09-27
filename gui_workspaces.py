@@ -6,7 +6,7 @@ from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import *
 from config import APP_NAME, DATABASE_PATH, DEFAULT_SCAN_PATH
 from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_conversion_job, inspect_conversion_source, prepare_conversion_job
-from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count
+from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -115,6 +115,16 @@ class AssetDialog(QDialog):
             sg.addWidget(card,shown//4,shown%4);shown+=1
         if not shown:sg.addWidget(QLabel("No visual evidence candidates available."),0,0)
         similar.setWidget(sh);tabs.addTab(similar,"Similar Visuals")
+        if kind=="model":
+            family=QScrollArea();family.setWidgetResizable(True);fh=QWidget();fg=QGridLayout(fh);fg.setAlignment(Qt.AlignTop|Qt.AlignLeft);members=db.family_members_for_model(row["path"],100)
+            for i,m in enumerate(members):
+                card=QFrame();card.setObjectName("card");cv=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);im.setMinimumSize(180,145);cp=cached_thumbnail(m["path"])
+                if cp:im.setPixmap(QPixmap(str(cp)).scaled(210,160,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+                else:im.setText("No render")
+                cv.addWidget(im);nm=QLabel(m["filename"]);nm.setAlignment(Qt.AlignCenter);nm.setWordWrap(True);cv.addWidget(nm);fn=QLabel(m["family_name"]);fn.setAlignment(Qt.AlignCenter);cv.addWidget(fn)
+                op=QPushButton("Open");op.clicked.connect(lambda _,p=m["path"]:AssetDialog(self.db,p,"model",self).exec());cv.addWidget(op);fg.addWidget(card,i//4,i%4)
+            if not members:fg.addWidget(QLabel("This model is not currently assigned to a model family."),0,0)
+            family.setWidget(fh);tabs.addTab(family,"Family")
         review=QWidget(); vb=QVBoxLayout(review); current=db.get_asset_review(row["path"])
         rr=QHBoxLayout(); self.status=QComboBox(); self.status.addItems(["new","reviewing","reviewed","dismissed","confirmed"]); self.priority=QComboBox(); self.priority.addItems(["low","normal","high","critical"])
         if current:self.status.setCurrentText(current["status"] or "new"); self.priority.setCurrentText(current["priority"] or "normal")
@@ -168,7 +178,7 @@ class ThumbnailStudio(QWidget):
         h=QLabel("Visual Library");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Build, browse and manage cached LOD0 renders for the indexed model library."))
         r=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Optional filename/folder/path filter");self.search.returnPressed.connect(self.refresh)
         self.count=QComboBox();self.count.addItems(["25","50","100","250","500","1000","All"]);self.count.setCurrentText("100")
-        self.view=QComboBox();self.view.addItems(["Cached only","All models","Missing renders"])
+        self.view=QComboBox();self.view.addItems(["Cached only","All models","Missing renders","Failed renders"])
         go=QPushButton("Render Missing");go.clicked.connect(self.start);refresh=QPushButton("Refresh Gallery");refresh.clicked.connect(self.refresh)
         for w in (self.search,QLabel("Batch"),self.count,QLabel("View"),self.view,go,refresh):r.addWidget(w)
         self.view.currentIndexChanged.connect(self.refresh);self.count.currentIndexChanged.connect(self.refresh)
@@ -195,13 +205,18 @@ class ThumbnailStudio(QWidget):
         rows,total=self.db.search_models_page(self.search.text().strip(),limit,0)
         host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0;cached_count=missing_count=0
         mode=self.view.currentText()
+        failed_map={x["model"]:x for x in thumbnail_failures(True)}
         for row in rows:
             p=cached_thumbnail(row["path"])
             if p:cached_count+=1
             else:missing_count+=1
             if mode=="Cached only" and not p:continue
             if mode=="Missing renders" and p:continue
-            grid.addWidget(self.make_card(row,p),shown//4,shown%4);shown+=1
+            if mode=="Failed renders" and row["path"] not in failed_map:continue
+            card=self.make_card(row,p)
+            if mode=="Failed renders" and row["path"] in failed_map:
+                err=QLabel("FAILED: "+str(failed_map[row["path"]].get("message",""))[-240:]);err.setWordWrap(True);err.setToolTip(str(failed_map[row["path"]].get("message","")));card.layout().insertWidget(1,err)
+            grid.addWidget(card,shown//4,shown%4);shown+=1
         if not shown:grid.addWidget(QLabel("No models match this view."),0,0)
         self.area.setWidget(host)
         self.status.setText(f"{shown:,} shown • {cached_count:,} cached • {missing_count:,} missing in current selection • {total:,} matching models")
@@ -211,7 +226,7 @@ class ThumbnailStudio(QWidget):
         if not p:return
         answer=QMessageBox.question(self,APP_NAME,f"Remove cached render for {Path(path).name}?" + chr(10) + chr(10) + "The model and database record will not be changed.",QMessageBox.Yes|QMessageBox.No)
         if answer==QMessageBox.Yes:
-            Path(p).unlink(missing_ok=True);self.refresh()
+            remove_cached_thumbnail(path);self.refresh()
 
     def render_one(self,row):
         links=self.db.links_for_model(row["path"],100);textures=[x["texture_path"] for x in links if x["texture_path"]]
