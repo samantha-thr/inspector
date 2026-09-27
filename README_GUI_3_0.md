@@ -9,13 +9,17 @@ pip install -r requirements.txt
 python there_inspector_gui.py
 ```
 
-## Current 3.0-dev6 capabilities
+## Current 3.0-dev7 capabilities
 
 - live dashboard with model, texture, evidence, review and last-scan information
 - scalable model/texture browsing with SQL paging, sorting and 250–5000 row page sizes
 - visual texture previews, including DDS through Pillow when supported
 - automatic cached Blender LOD0 model renders with transparent backgrounds
 - Visual Library workspace for batch-generating and browsing model thumbnails
+- render management with All/Missing/Cached/Failed views, individual render/remove/open actions, and continuous "All remaining" rendering
+- persistent renderer metadata (renderer version, timestamp and source state) for future selective refreshes
+- unresolved Blender render failure tracking with automatic resolution after a successful retry
+- visual model-family galleries inside Asset Profiles
 - live selected-asset preview panes in Models and Textures
 - cached model imagery reused in Models, Compare and Asset Profiles
 - visual Similar Assets galleries driven by evidence candidates
