@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json, os, subprocess, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from PySide6.QtCore import Qt, QSettings, QThread, Signal
 from PySide6.QtGui import QPixmap, QImage
@@ -156,21 +157,28 @@ class AssetDialog(QDialog):
 
 class ThumbnailBatchTask(QThread):
     progress=Signal(int,int,str); done=Signal(object)
-    def __init__(self,models,force=False):
-        super().__init__();self.models=models;self.force=force
+    def __init__(self,models,force=False,workers=1):
+        super().__init__();self.models=models;self.force=force;self.workers=max(1,int(workers))
+    def _render(self,item):
+        row,textures=item
+        if cached_thumbnail(row["path"]) and not self.force:return row,"cached",None
+        try:
+            result=render_model_thumbnail(row["path"],textures,512,self.force)
+            return row,("rendered" if result.get("success") else "failed"),result
+        except Exception as exc:return row,"failed",{"message":str(exc)}
     def run(self):
-        ok=failed=cached=0
-        for i,item in enumerate(self.models,1):
-            row,textures=item
-            self.progress.emit(i,len(self.models),row["filename"])
-            if cached_thumbnail(row["path"]) and not self.force:
-                cached+=1;continue
-            try:
-                r=render_model_thumbnail(row["path"],textures,512,self.force)
-                if r.get("success"):ok+=1
-                else:failed+=1
-            except Exception:failed+=1
-        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":len(self.models)})
+        counts={"rendered":0,"failed":0,"cached":0};total=len(self.models);completed=0;started=time.monotonic()
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            futures={pool.submit(self._render,item):item for item in self.models}
+            for future in as_completed(futures):
+                row,status,result=future.result();counts[status]+=1;completed+=1
+                elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
+                self.progress.emit(completed,total,f"{row['filename']} • {rate:.2f}/sec • ETA {self._fmt(remaining)}")
+        self.done.emit({**counts,"total":total,"elapsed":time.monotonic()-started,"workers":self.workers})
+    @staticmethod
+    def _fmt(seconds):
+        seconds=max(0,int(seconds));h,rem=divmod(seconds,3600);m,s=divmod(rem,60)
+        return f"{h:d}:{m:02d}:{s:02d}" if h else f"{m:d}:{s:02d}"
 
 class ThumbnailStudio(QWidget):
     def __init__(self,db):
@@ -178,9 +186,10 @@ class ThumbnailStudio(QWidget):
         h=QLabel("Visual Library");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Build, browse and manage cached LOD0 renders for the indexed model library."))
         r=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Optional filename/folder/path filter");self.search.returnPressed.connect(self.refresh)
         self.count=QComboBox();self.count.addItems(["25","50","100","250","500","1000","All"]);self.count.setCurrentText("100")
+        self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.workers.setToolTip("Parallel Blender render processes. 2 is a safe default; 3–4 may be faster on high-core systems.")
         self.view=QComboBox();self.view.addItems(["Cached only","All models","Missing renders","Failed renders"])
         go=QPushButton("Render Missing");go.clicked.connect(self.start);refresh=QPushButton("Refresh Gallery");refresh.clicked.connect(self.refresh)
-        for w in (self.search,QLabel("Batch"),self.count,QLabel("View"),self.view,go,refresh):r.addWidget(w)
+        for w in (self.search,QLabel("Batch"),self.count,QLabel("Workers"),self.workers,QLabel("View"),self.view,go,refresh):r.addWidget(w)
         self.view.currentIndexChanged.connect(self.refresh);self.count.currentIndexChanged.connect(self.refresh)
         b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.refresh()
@@ -235,7 +244,7 @@ class ThumbnailStudio(QWidget):
     def render_one(self,row):
         links=self.db.links_for_model(row["path"],100);textures=[x["texture_path"] for x in links if x["texture_path"]]
         self.progress.setRange(0,1);self.progress.setValue(0);self.status.setText(f"Rendering {row['filename']}…")
-        self.task=ThumbnailBatchTask([(row,textures)],False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
+        self.task=ThumbnailBatchTask([(row,textures)],False,1);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
 
     def start(self):
         all_mode=self.count.currentText()=="All";target=None if all_mode else int(self.count.currentText());term=self.search.text().strip();items=[];offset=0;page_size=1000 if all_mode else max(250,target);checked=0;first_missing=None
@@ -256,12 +265,13 @@ class ThumbnailStudio(QWidget):
         self.progress.setRange(0,len(items));self.progress.setValue(0)
         scope="all remaining" if all_mode else f"{len(items):,}"
         self.status.setText(f"Starting {scope} missing renders • {len(items):,} queued • first uncached model #{first_missing:,} • skipped {checked-len(items):,} cached models")
-        self.task=ThumbnailBatchTask(items,False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
+        self.task=ThumbnailBatchTask(items,False,int(self.workers.currentText()));self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,name):
         self.progress.setValue(i);self.status.setText(f"Rendering {i:,} / {total:,} • {name}")
     def finished(self,result):
         self.progress.setValue(self.progress.maximum());self.refresh()
-        self.status.setText(f"Complete • rendered {result['rendered']:,} • already cached {result['cached']:,} • failed {result['failed']:,} • {result['total']:,} processed")
+        elapsed=result.get("elapsed",0);rate=result["total"]/elapsed if elapsed else 0
+        self.status.setText(f"Complete • rendered {result['rendered']:,} • cached {result['cached']:,} • failed {result['failed']:,} • {result['total']:,} processed • {result.get('workers',1)} workers • {rate:.2f}/sec")
 
 class ComparePage(QWidget):
     def __init__(self,db):
