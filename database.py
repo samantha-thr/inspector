@@ -386,6 +386,20 @@ class Database:
     def family_members(self, fid, limit=500):
         return self.db.execute("SELECT fm.*, m.* FROM model_family_members fm JOIN models m ON m.path=fm.model_path WHERE family_id=? ORDER BY m.folder,m.filename LIMIT ?", (fid, limit)).fetchall()
 
+    def families_for_model(self, model_path, limit=50):
+        return self.db.execute("""SELECT f.*, fm.confidence member_confidence
+            FROM model_family_members fm JOIN model_families f ON f.id=fm.family_id
+            WHERE fm.model_path=? ORDER BY f.member_count DESC,f.confidence DESC LIMIT ?""",(model_path,limit)).fetchall()
+
+    def family_members_for_model(self, model_path, limit=250):
+        return self.db.execute("""SELECT DISTINCT m.*, f.id family_id, f.name family_name, fm2.confidence family_confidence
+            FROM model_family_members mine
+            JOIN model_families f ON f.id=mine.family_id
+            JOIN model_family_members fm2 ON fm2.family_id=mine.family_id
+            JOIN models m ON m.path=fm2.model_path
+            WHERE mine.model_path=? AND m.path<>?
+            ORDER BY f.member_count DESC,fm2.confidence DESC,m.folder,m.filename LIMIT ?""",(model_path,model_path,limit)).fetchall()
+
     # texture families
     def clear_texture_families(self):
         self.db.execute("DELETE FROM texture_family_members")
