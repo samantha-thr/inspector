@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, os, subprocess
+import json, os, subprocess, time
 from pathlib import Path
 from PySide6.QtCore import Qt, QSettings, QThread, Signal
 from PySide6.QtGui import QPixmap, QImage
@@ -193,6 +193,10 @@ class ThumbnailStudio(QWidget):
         else:im.setText("No cached render")
         v.addWidget(im)
         n=QLabel(row["filename"]);n.setWordWrap(True);n.setAlignment(Qt.AlignCenter);v.addWidget(n)
+        if p:
+            meta=render_metadata(row["path"]);rv=meta.get("render_version","legacy");ts=meta.get("rendered")
+            detail=f"Render v{rv}" + (f" • {time.strftime('%Y-%m-%d %H:%M',time.localtime(ts))}" if ts else "")
+            md=QLabel(detail);md.setAlignment(Qt.AlignCenter);md.setStyleSheet("color:#8f98a3;font-size:9pt");v.addWidget(md)
         buttons=QHBoxLayout();open_b=QPushButton("Open");open_b.clicked.connect(lambda _,path=row["path"]:AssetDialog(self.db,path,"model",self).exec());buttons.addWidget(open_b)
         if p:
             delete=QPushButton("Remove Render");delete.clicked.connect(lambda _,path=row["path"]:self.remove_render(path));buttons.addWidget(delete)
