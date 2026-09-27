@@ -23,6 +23,28 @@ def cached_thumbnail(model_path,size=512):
     p=thumbnail_path(model_path,size)
     return p if p.exists() else None
 
+def metadata_path(model_path):
+    return METADATA_DIR/f"{thumbnail_key(model_path)}.json"
+
+def render_metadata(model_path):
+    p=metadata_path(model_path)
+    if not p.exists():return {}
+    try:return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:return {}
+
+def write_render_metadata(model_path,output,size):
+    METADATA_DIR.mkdir(parents=True,exist_ok=True)
+    p=Path(model_path);st=p.stat()
+    data={"model":str(p),"output":str(output),"render_version":RENDER_VERSION,"rendered":time.time(),"size":size,
+          "source_size":st.st_size,"source_mtime_ns":st.st_mtime_ns}
+    metadata_path(model_path).write_text(json.dumps(data,indent=2),encoding="utf-8")
+    return data
+
+def remove_cached_thumbnail(model_path,size=512):
+    p=thumbnail_path(model_path,size);existed=p.exists()
+    p.unlink(missing_ok=True);metadata_path(model_path).unlink(missing_ok=True)
+    return existed
+
 def _script(obj_path,out_path,size):
     s=WORK_DIR/f"render_{thumbnail_key(obj_path)}_{int(time.time()*1000)}.py"
     code=f'''import bpy, math
@@ -82,7 +104,9 @@ def render_model_thumbnail(model_path,linked_textures=None,size=512,force=False)
     log=(proc.stdout or "")+"\
 "+(proc.stderr or "")
     success=proc.returncode==0 and out.exists()
-    if not success:log_thumbnail_failure(model_path,log[-4000:] or "Render failed",proc.returncode)
+    if success:
+        write_render_metadata(model_path,out,size);clear_thumbnail_failure(model_path)
+    else:log_thumbnail_failure(model_path,log[-4000:] or "Render failed",proc.returncode)
     return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:]}
 
 def log_thumbnail_failure(model_path,message,returncode=None):
@@ -116,9 +140,7 @@ def clear_thumbnail_failure(model_path):
 ") if keep else "",encoding="utf-8")
 
 def thumbnail_failure_count():
-    if not FAILURE_LOG.exists():return 0
-    try:return sum(1 for x in FAILURE_LOG.read_text(encoding="utf-8").splitlines() if x.strip())
-    except Exception:return 0
+    return len(thumbnail_failures(True))
 
 def purge_thumbnail_cache():
     removed=0
