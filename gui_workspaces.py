@@ -167,7 +167,7 @@ class ThumbnailStudio(QWidget):
         super().__init__();self.db=db;self.task=None;self.cards=[];b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Visual Library");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Build, browse and manage cached LOD0 renders for the indexed model library."))
         r=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Optional filename/folder/path filter");self.search.returnPressed.connect(self.refresh)
-        self.count=QComboBox();self.count.addItems(["25","50","100","250","500","1000"]);self.count.setCurrentText("100")
+        self.count=QComboBox();self.count.addItems(["25","50","100","250","500","1000","All"]);self.count.setCurrentText("100")
         self.view=QComboBox();self.view.addItems(["Cached only","All models","Missing renders"])
         go=QPushButton("Render Missing");go.clicked.connect(self.start);refresh=QPushButton("Refresh Gallery");refresh.clicked.connect(self.refresh)
         for w in (self.search,QLabel("Batch"),self.count,QLabel("View"),self.view,go,refresh):r.addWidget(w)
@@ -191,7 +191,8 @@ class ThumbnailStudio(QWidget):
         v.addLayout(buttons);return card
 
     def refresh(self):
-        rows,total=self.db.search_models_page(self.search.text().strip(),int(self.count.currentText()),0)
+        limit=1000 if self.count.currentText()=="All" else int(self.count.currentText())
+        rows,total=self.db.search_models_page(self.search.text().strip(),limit,0)
         host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0;cached_count=missing_count=0
         mode=self.view.currentText()
         for row in rows:
@@ -218,8 +219,8 @@ class ThumbnailStudio(QWidget):
         self.task=ThumbnailBatchTask([(row,textures)],False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
 
     def start(self):
-        target=int(self.count.currentText());term=self.search.text().strip();items=[];offset=0;page_size=max(250,target);checked=0;first_missing=None
-        while len(items)<target:
+        all_mode=self.count.currentText()=="All";target=None if all_mode else int(self.count.currentText());term=self.search.text().strip();items=[];offset=0;page_size=1000 if all_mode else max(250,target);checked=0;first_missing=None
+        while all_mode or len(items)<target:
             rows,total=self.db.search_models_page(term,page_size,offset)
             if not rows:break
             for row in rows:
@@ -228,13 +229,14 @@ class ThumbnailStudio(QWidget):
                 if first_missing is None:first_missing=offset+(rows.index(row))+1
                 links=self.db.links_for_model(row["path"],100)
                 items.append((dict(row),[x["texture_path"] for x in links if x["texture_path"]]))
-                if len(items)>=target:break
+                if not all_mode and len(items)>=target:break
             offset+=len(rows)
             if offset>=total:break
         if not items:
             self.status.setText(f"All {checked:,} matching models already have cached renders.");return
         self.progress.setRange(0,len(items));self.progress.setValue(0)
-        self.status.setText(f"Starting {len(items):,} missing renders • first uncached model #{first_missing:,} • skipped {checked-len(items):,} cached models")
+        scope="all remaining" if all_mode else f"{len(items):,}"
+        self.status.setText(f"Starting {scope} missing renders • {len(items):,} queued • first uncached model #{first_missing:,} • skipped {checked-len(items):,} cached models")
         self.task=ThumbnailBatchTask(items,False);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,name):
         self.progress.setValue(i);self.status.setText(f"Rendering {i:,} / {total:,} • {name}")
