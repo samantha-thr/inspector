@@ -35,6 +35,9 @@ def cached_variant_thumbnail(model_path,texture_paths,size=512):
     p=variant_thumbnail_path(model_path,texture_paths,size)
     return p if p.exists() else None
 
+def remove_cached_variant(model_path,texture_paths,size=512):
+    p=variant_thumbnail_path(model_path,texture_paths,size);existed=p.exists();p.unlink(missing_ok=True);return existed
+
 def cached_thumbnail(model_path,size=512):
     p=thumbnail_path(model_path,size)
     return p if p.exists() else None
@@ -76,6 +79,17 @@ visible=[o for o in meshes if o.name.split(".")[0]=="LOD0"]
 if not visible: visible=[o for o in meshes if not o.name.upper().startswith("COL") and not o.name.upper().startswith("LOD")]
 if not visible: visible=[o for o in meshes if not o.name.upper().startswith("COL")]
 for o in meshes: o.hide_render=o not in visible
+# Preserve alpha from texture-driven materials (notably buggy window layers).
+for mat in bpy.data.materials:
+    if not mat or not mat.use_nodes: continue
+    bsdf=mat.node_tree.nodes.get("Principled BSDF")
+    texnodes=[n for n in mat.node_tree.nodes if n.type=="TEX_IMAGE" and n.image]
+    if bsdf and texnodes:
+        tex=texnodes[0]
+        try:
+            mat.node_tree.links.new(tex.outputs["Alpha"],bsdf.inputs["Alpha"])
+            mat.surface_render_method="DITHERED"
+        except Exception: pass
 pts=[]
 for o in visible:
     pts.extend([o.matrix_world @ Vector(c) for c in o.bound_box])
