@@ -421,7 +421,9 @@ class VehicleVariantsPage(QWidget):
 
     def open_textures(self,paths):
         d=QDialog(self);d.setWindowTitle("Texture Set");d.resize(900,650);lay=QGridLayout(d)
-        roles={1:"Body",3:"Window Color",4:"Window Transparency"}
+        present={self.product_id(Path(p).name)[1] for p in paths if self.product_id(Path(p).name)}
+        roles={1:"Body"}
+        roles.update({2:"Window Color",3:"Window Transparency"} if (2 in present and 3 in present and 4 not in present) else {3:"Window Color",4:"Window Transparency"})
         for i,p in enumerate(paths):
             parsed=self.product_id(Path(p).name);slot=parsed[1] if parsed else None
             subtitle=f"_{slot} • {roles.get(slot,'Texture')}" if slot else ""
