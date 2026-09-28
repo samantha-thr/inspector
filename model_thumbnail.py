@@ -11,7 +11,7 @@ WORK_DIR=PROJECT_DIR/"cache"/"thumbnail_work"
 FAILURE_LOG=PROJECT_DIR/"cache"/"thumbnail_failures.jsonl"
 METADATA_DIR=PROJECT_DIR/"cache"/"model_thumbnail_meta"
 RENDER_VERSION=2
-VARIANT_RENDER_VERSION=6
+VARIANT_RENDER_VERSION=7
 VARIANT_CACHE_DIR=PROJECT_DIR/"cache"/"model_variants"
 
 def thumbnail_key(model_path):
@@ -158,10 +158,11 @@ def render_model_variant(model_path,texture_paths,size=512,force=False,cancel_ev
     for tp in texture_paths:
         m=re.match(r"^\d+_([1-9]\d*)\.",Path(tp).name,re.IGNORECASE)
         if m:slots[int(m.group(1))]=str(Path(tp).resolve())
-    if 3 in slots and 4 in slots:
+    window_color_slot,window_alpha_slot=(3,4) if 4 in slots else ((2,3) if 2 in slots and 3 in slots else (None,None))
+    if window_color_slot and window_alpha_slot:
         txt=script.read_text(encoding="utf-8")
-        color_ready=str(blender_texture_path(slots[3],WORK_DIR/"decoded_textures").resolve())
-        alpha_ready=str(blender_texture_path(slots[4],WORK_DIR/"decoded_textures").resolve())
+        color_ready=str(blender_texture_path(slots[window_color_slot],WORK_DIR/"decoded_textures").resolve())
+        alpha_ready=str(blender_texture_path(slots[window_alpha_slot],WORK_DIR/"decoded_textures").resolve())
         window_mat=next((m for m in decoded.materials if (m.map_mask & 0x03)==0x03),None)
         if window_mat is None and len(decoded.materials)>=2: window_mat=decoded.materials[1]
         window_name=re.sub(r"[^A-Za-z0-9_.-]+","_",window_mat.name or "").strip("_") if window_mat else ""
