@@ -397,7 +397,11 @@ class VehicleVariantsPage(QWidget):
 
     def open_textures(self,paths):
         d=QDialog(self);d.setWindowTitle("Texture Set");d.resize(900,650);lay=QGridLayout(d)
-        for i,p in enumerate(paths):lay.addWidget(TextureThumb(p,Path(p).name),i//3,i%3)
+        roles={1:"Body",3:"Window Color",4:"Window Transparency"}
+        for i,p in enumerate(paths):
+            parsed=self.product_id(Path(p).name);slot=parsed[1] if parsed else None
+            subtitle=f"_{slot} • {roles.get(slot,'Texture')}" if slot else ""
+            lay.addWidget(TextureThumb(p,Path(p).name,subtitle),i//3,i%3)
         d.exec()
     def render_missing(self):
         self.model=self.current_model()
