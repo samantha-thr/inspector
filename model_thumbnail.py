@@ -154,7 +154,7 @@ def render_model_variant(model_path,texture_paths,size=512,force=False):
     import re
     slots={}
     for tp in texture_paths:
-        m=re.match(r"^\\d+_([1-9]\\d*)\\.",Path(tp).name,re.IGNORECASE)
+        m=re.match(r"^\d+_([1-9]\d*)\.",Path(tp).name,re.IGNORECASE)
         if m:slots[int(m.group(1))]=str(Path(tp).resolve())
     if 3 in slots and 4 in slots:
         txt=script.read_text(encoding="utf-8")
