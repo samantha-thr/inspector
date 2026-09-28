@@ -7,7 +7,7 @@ from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import *
 from config import APP_NAME, DATABASE_PATH, DEFAULT_SCAN_PATH
 from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_conversion_job, inspect_conversion_source, prepare_conversion_job
-from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION
+from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION, cached_variant_thumbnail, render_model_variant
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -296,6 +296,77 @@ class ThumbnailStudio(QWidget):
         self.progress.setValue(self.progress.maximum());self.refresh()
         elapsed=result.get("elapsed",0);rate=result["total"]/elapsed if elapsed else 0
         self.status.setText(f"Complete • rendered {result['rendered']:,} • cached {result['cached']:,} • failed {result['failed']:,} • {result['total']:,} processed • {result.get('workers',1)} workers • {rate:.2f}/sec")
+
+class VariantRenderTask(QThread):
+    progress=Signal(int,int,str);done=Signal(object)
+    def __init__(self,model,sets,workers=2):
+        super().__init__();self.model=model;self.sets=sets;self.workers=max(1,workers)
+    def run(self):
+        ok=failed=cached=0;completed=0;total=len(self.sets)
+        def one(item):
+            pid,paths=item;r=render_model_variant(self.model["path"],paths,512,False);return pid,r
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            fs={pool.submit(one,x):x for x in self.sets}
+            for future in as_completed(fs):
+                pid,r=future.result();completed+=1
+                if r.get("cached"):cached+=1
+                elif r.get("success"):ok+=1
+                else:failed+=1
+                self.progress.emit(completed,total,pid)
+        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total})
+
+class VehicleVariantsPage(QWidget):
+    def __init__(self,db):
+        super().__init__();self.db=db;self.task=None;self.sets=[];self.model=None;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
+        r=QHBoxLayout();self.folder=QLineEdit("bg");self.model_box=QComboBox();load=QPushButton("Load Folder");load.clicked.connect(self.load_folder)
+        self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing)
+        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Workers"),self.workers,render):r.addWidget(w)
+        b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
+        self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.load_folder()
+    @staticmethod
+    def product_id(name):
+        import re
+        m=re.match(r"^(\\d+)_([1-9]\\d*)\\.",name)
+        return (m.group(1),int(m.group(2))) if m else None
+    def load_folder(self):
+        models=self.db.models_in_folder(self.folder.text().strip(),10000);self.model_box.blockSignals(True);self.model_box.clear()
+        for m in models:self.model_box.addItem(m["filename"],dict(m))
+        self.model_box.blockSignals(False);self.discover();self.refresh()
+    def discover(self):
+        groups={}
+        for t in self.db.textures_in_folder(self.folder.text().strip(),100000):
+            parsed=self.product_id(t["filename"])
+            if not parsed:continue
+            pid,slot=parsed;groups.setdefault(pid,{})[slot]=t["path"]
+        self.sets=[(pid,[slots[k] for k in sorted(slots)]) for pid,slots in sorted(groups.items(),key=lambda x:int(x[0]))]
+    def current_model(self):
+        d=self.model_box.currentData();return d if d else None
+    def refresh(self):
+        self.model=self.current_model();host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0;cached=0
+        if self.model:
+            for pid,paths in self.sets:
+                p=cached_variant_thumbnail(self.model["path"],paths)
+                if not p:continue
+                cached+=1;card=QFrame();card.setObjectName("card");v=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);pix=QPixmap(str(p));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation));v.addWidget(im)
+                n=QLabel(f"PID {pid} • {len(paths)} texture(s)");n.setAlignment(Qt.AlignCenter);v.addWidget(n)
+                tex=QPushButton("Open Texture Set");tex.clicked.connect(lambda _,pp=paths:self.open_textures(pp));v.addWidget(tex);grid.addWidget(card,shown//4,shown%4);shown+=1
+        if not shown:grid.addWidget(QLabel("No variant renders yet. Choose a model and click Render Missing Variants."),0,0)
+        self.area.setWidget(host);self.status.setText(f"{len(self.sets):,} PID texture sets discovered • {cached:,} rendered for selected model")
+    def open_textures(self,paths):
+        d=QDialog(self);d.setWindowTitle("Texture Set");d.resize(900,650);lay=QGridLayout(d)
+        for i,p in enumerate(paths):lay.addWidget(TextureThumb(p,Path(p).name),i//3,i%3)
+        d.exec()
+    def render_missing(self):
+        self.model=self.current_model()
+        if not self.model:return
+        missing=[x for x in self.sets if not cached_variant_thumbnail(self.model["path"],x[1])]
+        if not missing:self.status.setText("All discovered texture sets are already rendered on this model.");return
+        self.progress.setRange(0,len(missing));self.progress.setValue(0);self.task=VariantRenderTask(self.model,missing,int(self.workers.currentText()));self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
+    def on_progress(self,i,total,pid):
+        self.progress.setValue(i);self.status.setText(f"Rendering variant {i:,} / {total:,} • PID {pid}")
+    def finished(self,result):
+        self.refresh();self.progress.setValue(self.progress.maximum());self.status.setText(f"Complete • rendered {result['rendered']:,} • cached {result['cached']:,} • failed {result['failed']:,}")
 
 class ComparePage(QWidget):
     def __init__(self,db):
