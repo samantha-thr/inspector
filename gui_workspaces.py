@@ -194,7 +194,7 @@ class ThumbnailStudio(QWidget):
         for w in (QLabel("Workers"),self.workers,go,refresh):actions.addWidget(w)
         actions.addStretch();b.addLayout(actions)
         self.view.currentIndexChanged.connect(self.reset_gallery);self.count.currentIndexChanged.connect(self.reset_gallery);self.search.textChanged.connect(self.reset_gallery)
-self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
+        self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1)
         nav=QHBoxLayout();self.gallery_prev=QPushButton("Previous 250");self.gallery_next=QPushButton("Next 250");self.gallery_page_label=QLabel()
         self.gallery_prev.clicked.connect(self.prev_gallery);self.gallery_next.clicked.connect(self.next_gallery)
