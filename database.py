@@ -359,6 +359,19 @@ class Database:
         return self.db.execute("""SELECT l.*, t.relative_path texture_relative_path, t.dds_format, t.width, t.height, t.dds_width, t.dds_height, t.sha256 texture_sha256, t.ahash
         FROM model_texture_links l JOIN textures t ON t.path=l.texture_path WHERE model_path=? ORDER BY score DESC LIMIT ?""", (model_path, limit)).fetchall()
 
+    def asset_folders(self):
+        """Folders that contain indexed models or textures, with useful counts."""
+        return self.db.execute("""SELECT folder, SUM(model_count) model_count, SUM(texture_count) texture_count
+            FROM (
+                SELECT folder, COUNT(*) model_count, 0 texture_count FROM models
+                WHERE folder IS NOT NULL AND trim(folder)!='' GROUP BY folder
+                UNION ALL
+                SELECT folder, 0 model_count, COUNT(*) texture_count FROM textures
+                WHERE folder IS NOT NULL AND trim(folder)!='' GROUP BY folder
+            )
+            GROUP BY folder
+            ORDER BY lower(folder)""").fetchall()
+
     def textures_in_folder(self, folder, limit=100000):
         key=str(folder or "").strip().replace("/","\\").strip("\\").lower()
         rows=self.db.execute("""SELECT * FROM textures
