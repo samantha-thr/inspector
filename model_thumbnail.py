@@ -148,6 +148,42 @@ def render_model_variant(model_path,texture_paths,size=512,force=False):
     if not blender:return {"success":False,"message":"Blender not detected"}
     decoded=decode_model(model_path);key=variant_key(model_path,texture_paths,size);obj=WORK_DIR/f"variant_{key}.obj"
     export_obj(decoded,obj,texture_paths,include_collision=False);script=_script(obj,out,size)
+    # Blender's OBJ/MTL importer does not reliably retain a separate map_d.
+    # Build the known There buggy window shader explicitly: _3=RGB, _4=opacity.
+    import re
+    slots={}
+    for tp in texture_paths:
+        m=re.match(r"^\\d+_([1-9]\\d*)\\.",Path(tp).name,re.IGNORECASE)
+        if m:slots[int(m.group(1))]=str(Path(tp).resolve())
+    if 3 in slots and 4 in slots:
+        txt=script.read_text(encoding="utf-8")
+        setup=f"WINDOW_COLOR={slots[3]!r}\\nWINDOW_ALPHA={slots[4]!r}\\n"
+        block='''# Explicit There buggy window shader.
+try:
+    color_img=bpy.data.images.load(WINDOW_COLOR,check_existing=True)
+    alpha_img=bpy.data.images.load(WINDOW_ALPHA,check_existing=True)
+    # Find the material currently carrying the _3 colour image.
+    target=None
+    for mat in bpy.data.materials:
+        if not mat or not mat.use_nodes: continue
+        for node in mat.node_tree.nodes:
+            if node.type=="TEX_IMAGE" and node.image and Path(node.image.filepath).name.lower()==Path(WINDOW_COLOR).name.lower():
+                target=mat; break
+        if target: break
+    if target:
+        nodes=target.node_tree.nodes; links=target.node_tree.links; bsdf=nodes.get("Principled BSDF")
+        if bsdf:
+            color_node=next((n for n in nodes if n.type=="TEX_IMAGE" and n.image and Path(n.image.filepath).name.lower()==Path(WINDOW_COLOR).name.lower()),None)
+            alpha_node=nodes.new("ShaderNodeTexImage"); alpha_node.image=alpha_img; alpha_node.label="There _4 Window Opacity"; alpha_node.image.colorspace_settings.name="Non-Color"
+            if color_node: links.new(color_node.outputs["Color"],bsdf.inputs["Base Color"])
+            links.new(alpha_node.outputs["Color"],bsdf.inputs["Alpha"])
+            target.surface_render_method="DITHERED"
+except Exception as e:
+    print("There window shader warning:",e)
+'''
+        marker="# Preserve alpha from texture-driven materials (notably buggy window layers)."
+        txt=setup+txt.replace(marker,block+"\\n"+marker)
+        script.write_text(txt,encoding="utf-8")
     proc=subprocess.run([blender,"--background","--factory-startup","--python",str(script)],capture_output=True,text=True,timeout=180)
     log=(proc.stdout or "")+"\
 "+(proc.stderr or "");success=proc.returncode==0 and out.exists()
