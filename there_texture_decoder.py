@@ -20,8 +20,14 @@ def decode_dxa5(path):
         for bx in range((width+3)//4):
             if off+8>len(src): raise ValueError("Truncated DXA5 block data")
             a0,a1=int(src[off]),int(src[off+1]);bits=int.from_bytes(src[off+2:off+8],"little");off+=8
-            if a0>a1: table=[a0,a1]+[((7-i)*a0+(i-1)*a1+3)//7 for i in range(2,8)]
-            else: table=[a0,a1]+[((5-(i-2))*a0+(i-1)*a1+2)//5 for i in range(2,6)]+[0,255]
+            if a0>a1:
+                # BC3/DXT5 alpha palette: 6/7..1/7 interpolation.
+                table=[a0,a1]+[((8-i)*a0+(i-1)*a1+3)//7 for i in range(2,8)]
+            else:
+                # BC3/DXT5 alpha palette: 4/5..1/5 interpolation, then 0/255.
+                # The previous coefficients summed to 6 while dividing by 5,
+                # which could produce values >255 and crash bytearray assignment.
+                table=[a0,a1]+[((6-i)*a0+(i-1)*a1+2)//5 for i in range(2,6)]+[0,255]
             for py in range(4):
                 for px in range(4):
                     x=bx*4+px;y=by*4+py
@@ -37,7 +43,7 @@ def decoded_texture_path(path,cache_dir):
     p=Path(path)
     if not is_dxa5(p): return p
     cache=Path(cache_dir);cache.mkdir(parents=True,exist_ok=True);st=p.stat()
-    key=hashlib.sha256(f"{p.resolve()}|{st.st_size}|{st.st_mtime_ns}|dxa5-v1".encode()).hexdigest()[:24]
+    key=hashlib.sha256(f"{p.resolve()}|{st.st_size}|{st.st_mtime_ns}|dxa5-v2".encode()).hexdigest()[:24]
     out=cache/f"{key}_dxa5.png"
     if not out.exists(): decode_dxa5(p).save(out,"PNG")
     return out
@@ -48,7 +54,7 @@ def blender_texture_path(path,cache_dir):
     p=Path(path)
     if not p.name.lower().endswith(".dds"): return p
     cache=Path(cache_dir);cache.mkdir(parents=True,exist_ok=True);st=p.stat()
-    key=hashlib.sha256(f"{p.resolve()}|{st.st_size}|{st.st_mtime_ns}|blender-png-v1".encode()).hexdigest()[:24]
+    key=hashlib.sha256(f"{p.resolve()}|{st.st_size}|{st.st_mtime_ns}|blender-png-v2".encode()).hexdigest()[:24]
     out=cache/f"{key}_{p.stem}.png"
     if not out.exists():
         img=open_texture_image(p)
