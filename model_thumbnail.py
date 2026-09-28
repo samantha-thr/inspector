@@ -175,7 +175,6 @@ try:
         if not mat or not mat.use_nodes: continue
         if WINDOW_MATERIAL and (mat.name==WINDOW_MATERIAL or mat.name.startswith(WINDOW_MATERIAL+".")):
             target=mat; break
-    if target: break
     if target:
         nodes=target.node_tree.nodes; links=target.node_tree.links; bsdf=nodes.get("Principled BSDF")
         if bsdf:
