@@ -158,7 +158,7 @@ def render_model_variant(model_path,texture_paths,size=512,force=False,cancel_ev
     for tp in texture_paths:
         m=re.match(r"^\d+_([1-9]\d*)\.",Path(tp).name,re.IGNORECASE)
         if m:slots[int(m.group(1))]=str(Path(tp).resolve())
-    window_color_slot,window_alpha_slot=(3,4) if 4 in slots else ((2,3) if 2 in slots and 3 in slots else (None,None))
+    window_color_slot,window_alpha_slot=(3,4) if 3 in slots and 4 in slots else ((2,3) if 2 in slots and 3 in slots else (None,None))
     if window_color_slot and window_alpha_slot:
         txt=script.read_text(encoding="utf-8")
         color_ready=str(blender_texture_path(slots[window_color_slot],WORK_DIR/"decoded_textures").resolve())
@@ -307,7 +307,7 @@ for line in sys.stdin:
         for tp in texture_paths:
             m=re.match(r"^\d+_([1-9]\d*)\.",Path(tp).name,re.I)
             if m:slots[int(m.group(1))]=str(Path(tp).resolve())
-        wc,wa=(3,4) if 4 in slots else ((2,3) if 2 in slots and 3 in slots else (None,None))
+        wc,wa=(3,4) if 3 in slots and 4 in slots else ((2,3) if 2 in slots and 3 in slots else (None,None))
         if 1 not in slots:return {"success":False,"message":"Variant has no _1 body texture","output":str(out)}
         decoded_dir=WORK_DIR/"decoded_textures"
         job={"pid":str(pid),"body":str(blender_texture_path(slots[1],decoded_dir).resolve()),"window_color":str(blender_texture_path(slots[wc],decoded_dir).resolve()) if wc else None,"window_alpha":str(blender_texture_path(slots[wa],decoded_dir).resolve()) if wa else None,"output":str(out.resolve())}
