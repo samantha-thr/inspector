@@ -163,6 +163,7 @@ def render_model_variant(model_path,texture_paths,size=512,force=False):
         color_ready=str(blender_texture_path(slots[3],WORK_DIR/"decoded_textures").resolve())
         alpha_ready=str(blender_texture_path(slots[4],WORK_DIR/"decoded_textures").resolve())
         window_mat=next((m for m in decoded.materials if (m.map_mask & 0x03)==0x03),None)
+        if window_mat is None and len(decoded.materials)>=2: window_mat=decoded.materials[1]
         window_name=re.sub(r"[^A-Za-z0-9_.-]+","_",window_mat.name or "").strip("_") if window_mat else ""
         setup=f"WINDOW_MATERIAL={window_name!r}\nWINDOW_COLOR={color_ready!r}\nWINDOW_ALPHA={alpha_ready!r}\n"
         block='''# Explicit There buggy window shader.
@@ -178,7 +179,11 @@ try:
     if target:
         nodes=target.node_tree.nodes; links=target.node_tree.links; bsdf=nodes.get("Principled BSDF")
         if bsdf:
-            color_node=next((n for n in nodes if n.type=="TEX_IMAGE" and n.image),None)
+            color_node=None
+            if bsdf.inputs["Base Color"].is_linked:
+                candidate=bsdf.inputs["Base Color"].links[0].from_node
+                if candidate and candidate.type=="TEX_IMAGE": color_node=candidate
+            if color_node is None: color_node=next((n for n in nodes if n.type=="TEX_IMAGE" and n.image),None)
             alpha_node=nodes.new("ShaderNodeTexImage"); alpha_node.image=alpha_img; alpha_node.label="There _4 Window Opacity"; alpha_node.image.colorspace_settings.name="Non-Color"
             if color_node:
                 color_node.image=color_img
