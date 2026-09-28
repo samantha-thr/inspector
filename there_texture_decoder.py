@@ -41,3 +41,19 @@ def decoded_texture_path(path,cache_dir):
     out=cache/f"{key}_dxa5.png"
     if not out.exists(): decode_dxa5(p).save(out,"PNG")
     return out
+
+
+def blender_texture_path(path,cache_dir):
+    """Return a Blender-safe PNG for There DDS textures, including DXA5."""
+    p=Path(path)
+    if not p.name.lower().endswith(".dds"): return p
+    cache=Path(cache_dir);cache.mkdir(parents=True,exist_ok=True);st=p.stat()
+    key=hashlib.sha256(f"{p.resolve()}|{st.st_size}|{st.st_mtime_ns}|blender-png-v1".encode()).hexdigest()[:24]
+    out=cache/f"{key}_{p.stem}.png"
+    if not out.exists():
+        img=open_texture_image(p)
+        try: img.save(out,"PNG")
+        finally:
+            try: img.close()
+            except Exception: pass
+    return out
