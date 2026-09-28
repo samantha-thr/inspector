@@ -330,9 +330,22 @@ class VehicleVariantsPage(QWidget):
         m=re.match(r"^(\\d+)_([1-9]\\d*)\\.",name)
         return (m.group(1),int(m.group(2))) if m else None
     def load_folder(self):
-        models=self.db.models_in_folder(self.folder.text().strip(),10000);self.model_box.blockSignals(True);self.model_box.clear()
-        for m in models:self.model_box.addItem(m["filename"],dict(m))
-        self.model_box.blockSignals(False);self.discover();self.refresh()
+        folder=self.folder.text().strip();previous=self.model_box.currentText()
+        self.status.setText(f"Loading {folder}…");self.load_button.setEnabled(False);QApplication.processEvents()
+        try:
+            models=self.db.models_in_folder(folder,10000);self.model_box.blockSignals(True);self.model_box.clear()
+            for m in models:self.model_box.addItem(m["filename"],dict(m))
+            if previous:
+                idx=self.model_box.findText(previous)
+                if idx>=0:self.model_box.setCurrentIndex(idx)
+            self.model_box.blockSignals(False);self.discover();self.refresh()
+            if self.raw_texture_count:
+                self.status.setText(f"Loaded {len(models):,} models • scanned {self.raw_texture_count:,} textures • discovered {len(self.sets):,} PID sets from {folder}")
+            else:
+                dbg=self.db.texture_folder_debug(folder,8)
+                samples=" | ".join(f"{x['folder']!r}: {x['count']:,} e.g. {x['sample']}" for x in dbg)
+                self.status.setText(f"Loaded {len(models):,} models • scanned 0 textures for {folder} • DB matches: {samples or 'none'}")
+        finally:self.load_button.setEnabled(True)
     def discover(self):
         groups={};textures=self.db.textures_in_folder(self.folder.text().strip(),100000);self.raw_texture_count=len(textures)
         for t in textures:
