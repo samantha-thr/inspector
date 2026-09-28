@@ -377,7 +377,7 @@ class VariantRenderTask(QThread):
 
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
-        super().__init__();self.db=db;self.task=None;self.sets=[];self.set_models={};self.ts_paths={};self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        super().__init__();self.db=db;self.task=None;self.sets=[];self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
         # Two-row responsive toolbar: selection on top, render actions below.
         select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(210);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder");self.model_box=QComboBox();self.model_box.setMinimumWidth(180);self.model_box.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
@@ -390,6 +390,7 @@ class VehicleVariantsPage(QWidget):
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
         for w in (QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,render,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
+        self.compatibility=QLabel("Select the correct model/template before rendering.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.load_folder()
     def folder_name(self):
@@ -429,48 +430,10 @@ class VehicleVariantsPage(QWidget):
                 samples=" | ".join(f"{x['folder']!r}: {x['count']:,} e.g. {x['sample']}" for x in dbg)
                 self.status.setText(f"Loaded {len(models):,} models • scanned 0 textures for {folder} • DB matches: {samples or 'none'}")
         finally:self.load_button.setEnabled(True)
-    @staticmethod
-    def ts_model_for_set(pid,paths):
-        """Read There's per-product .ts file and return the exact model basename it targets."""
-        import re
-        candidates=[]
-        for p in paths:
-            parent=Path(p).parent
-            candidates.extend([parent/f"{pid}.ts",parent.parent/f"{pid}.ts"])
-        seen=set()
-        for ts in candidates:
-            key=str(ts).lower()
-            if key in seen or not ts.is_file():continue
-            seen.add(key)
-            try:text=ts.read_text(encoding="utf-8",errors="ignore")
-            except OSError:continue
-            m=re.search(r"(?im)^\\s*model\\s*=\\s*[\"']([^\"']+\\.model)[\"']",text)
-            if m:return Path(m.group(1).replace("\\\\","/")).name.lower(),str(ts)
-        return None,None
-
     def compatible_sets(self,model=None):
-        model=model or self.current_model()
-        if not model:return []
-        target=Path(model["filename"]).name.lower()
-        mapped=[x for x in self.sets if self.set_models.get(x[0])]
-        if not mapped:
-            # Legacy fallback when this resource folder contains no readable product scripts.
-            return self.sets
-        return [x for x in self.sets if self.set_models.get(x[0])==target]
-
-    def update_model_labels(self):
-        current=self.model_box.currentData()
-        self.model_box.blockSignals(True)
-        for i in range(self.model_box.count()):
-            model=self.model_box.itemData(i)
-            if not model:continue
-            count=len(self.compatible_sets(model))
-            self.model_box.setItemText(i,f"{model['filename']}   •   {count:,} mapped PID sets")
-        if current:
-            for i in range(self.model_box.count()):
-                d=self.model_box.itemData(i)
-                if d and d.get("path")==current.get("path"):self.model_box.setCurrentIndex(i);break
-        self.model_box.blockSignals(False)
+        # Do not infer product/model compatibility without authoritative evidence.
+        # A folder can contain several templates/custom models.
+        return self.sets if (model or self.current_model()) else []
 
     def discover(self):
         groups={};textures=self.db.textures_in_folder(self.folder_name(),100000);self.raw_texture_count=len(textures)
@@ -479,11 +442,7 @@ class VehicleVariantsPage(QWidget):
             if not parsed:continue
             pid,slot=parsed;groups.setdefault(pid,{})[slot]=t["path"]
         self.sets=[(pid,[slots[k] for k in sorted(slots)]) for pid,slots in sorted(groups.items(),key=lambda x:int(x[0]))]
-        self.set_models={};self.ts_paths={}
-        for pid,paths in self.sets:
-            model,ts=self.ts_model_for_set(pid,paths)
-            if model:self.set_models[pid]=model;self.ts_paths[pid]=ts
-        self.update_model_labels()
+
     def current_model(self):
         d=self.model_box.currentData();return d if d else None
     def refresh(self):
@@ -497,12 +456,10 @@ class VehicleVariantsPage(QWidget):
                 buttons=QHBoxLayout();tex=QPushButton("Open Texture Set");tex.clicked.connect(lambda _,pp=paths:self.open_textures(pp));delete=QPushButton("Delete Render");delete.clicked.connect(lambda _,pp=paths:self.delete_variant(pp));buttons.addWidget(tex);buttons.addWidget(delete);v.addLayout(buttons);grid.addWidget(card,shown//4,shown%4);shown+=1
         if not shown:grid.addWidget(QLabel("No compatible variant renders yet. Choose a model and click Render Missing Variants."),0,0)
         self.area.setWidget(host)
-        compatible=self.compatible_sets(self.model);mapped=len(self.set_models);unknown=len(self.sets)-mapped
-        if mapped:
-            self.compatibility.setText(f"Protected mapping • {len(compatible):,} PID sets target {self.model['filename'] if self.model else 'selected model'} • {mapped:,} sets mapped from .ts product scripts • {unknown:,} unmapped sets excluded")
-        else:
-            self.compatibility.setText("Compatibility mapping unavailable in this folder: no readable PID .ts product scripts were found. All discovered sets are shown as a legacy fallback.")
-        self.status.setText(f"{len(self.sets):,} PID texture sets discovered • {len(compatible):,} compatible with selected model • {cached:,} rendered")
+        compatible=self.compatible_sets(self.model)
+        if self.model:
+            self.compatibility.setText(f"Selected render model: {self.model['filename']} • Compatibility is NOT inferred from folder membership. Verify the model/template before rendering.")
+        self.status.setText(f"{len(self.sets):,} PID texture sets discovered • {cached:,} rendered for selected model")
     def delete_variant(self,paths):
         if not self.model:return
         remove_cached_variant(self.model["path"],paths);self.refresh()
@@ -542,7 +499,10 @@ class VehicleVariantsPage(QWidget):
         self.model=self.current_model()
         if not self.model:return
         missing=[x for x in self.compatible_sets(self.model) if not cached_variant_thumbnail(self.model["path"],x[1])]
-        if not missing:self.status.setText("All compatible texture sets are already rendered on this model.");return
+        if not missing:self.status.setText("All discovered texture sets are already rendered on this model.");return
+        model_name=self.model.get("filename",Path(self.model["path"]).name)
+        answer=QMessageBox.question(self,"Confirm Variant Model",f"Render {len(missing):,} texture sets on {model_name}?\\n\\nThis folder may contain multiple templates/custom models. Inspector will not guess compatibility until it has authoritative mapping evidence.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if answer!=QMessageBox.Yes:return
         self.progress.setRange(0,len(missing));self.progress.setValue(0);self.progress.setFormat("%v / %m • %p%");self.render_button.setEnabled(False);self.cancel_button.setEnabled(True);worker_count=int(self.workers.currentText());engine_name="persistent" if self.engine.currentIndex()==0 else "one-shot";self.status.setText(f"Starting {engine_name} render • {len(missing):,} missing variants • {worker_count} worker(s)…");self.task=VariantRenderTask(self.model,missing,worker_count,self.engine.currentIndex()==0);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,pid,rate,remaining):
         self.progress.setValue(i);self.status.setText(f"Rendering {i:,} / {total:,} • PID {pid} • {rate:.2f}/sec • ETA {ThumbnailBatchTask._fmt(remaining)}")
