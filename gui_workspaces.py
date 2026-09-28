@@ -298,12 +298,12 @@ class ThumbnailStudio(QWidget):
         self.status.setText(f"Complete • rendered {result['rendered']:,} • cached {result['cached']:,} • failed {result['failed']:,} • {result['total']:,} processed • {result.get('workers',1)} workers • {rate:.2f}/sec")
 
 class VariantRenderTask(QThread):
-    progress=Signal(int,int,str);done=Signal(object)
+    progress=Signal(int,int,str,float,float);done=Signal(object)
     def __init__(self,model,sets,workers=2):
         super().__init__();self.model=model;self.sets=sets;self.workers=max(1,workers);self.cancelled=False
     def cancel(self):self.cancelled=True
     def run(self):
-        ok=failed=cached=0;completed=0;total=len(self.sets)
+        ok=failed=cached=0;completed=0;total=len(self.sets);started=time.monotonic()
         def one(item):
             pid,paths=item;r=render_model_variant(self.model["path"],paths,512,False);return pid,r
         with ThreadPoolExecutor(max_workers=self.workers) as pool:
@@ -316,7 +316,8 @@ class VariantRenderTask(QThread):
                 if r.get("cached"):cached+=1
                 elif r.get("success"):ok+=1
                 else:failed+=1
-                self.progress.emit(completed,total,pid)
+                elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
+                self.progress.emit(completed,total,pid,rate,remaining)
         self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"cancelled":self.cancelled,"completed":completed})
 
 class VehicleVariantsPage(QWidget):
@@ -408,9 +409,9 @@ class VehicleVariantsPage(QWidget):
         if not self.model:return
         missing=[x for x in self.sets if not cached_variant_thumbnail(self.model["path"],x[1])]
         if not missing:self.status.setText("All discovered texture sets are already rendered on this model.");return
-        self.progress.setRange(0,len(missing));self.progress.setValue(0);self.render_button.setEnabled(False);self.cancel_button.setEnabled(True);self.task=VariantRenderTask(self.model,missing,int(self.workers.currentText()));self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
-    def on_progress(self,i,total,pid):
-        self.progress.setValue(i);self.status.setText(f"Rendering variant {i:,} / {total:,} • PID {pid}")
+        self.progress.setRange(0,len(missing));self.progress.setValue(0);self.progress.setFormat("%v / %m • %p%");self.render_button.setEnabled(False);self.cancel_button.setEnabled(True);worker_count=int(self.workers.currentText());self.status.setText(f"Starting render • {len(missing):,} missing variants • {worker_count} worker(s)…");self.task=VariantRenderTask(self.model,missing,worker_count);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
+    def on_progress(self,i,total,pid,rate,remaining):
+        self.progress.setValue(i);self.status.setText(f"Rendering {i:,} / {total:,} • PID {pid} • {rate:.2f}/sec • ETA {ThumbnailBatchTask._fmt(remaining)}")
     def finished(self,result):
         self.render_button.setEnabled(True);self.cancel_button.setEnabled(False);self.refresh()
         if result.get("cancelled"):
