@@ -377,7 +377,7 @@ class VariantRenderTask(QThread):
 
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
-        super().__init__();self.db=db;self.task=None;self.sets=[];self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        super().__init__();self.db=db;self.task=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
         # Two-row responsive toolbar: selection on top, render actions below.
         select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(210);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder");self.model_box=QComboBox();self.model_box.setMinimumWidth(180);self.model_box.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
@@ -430,10 +430,54 @@ class VehicleVariantsPage(QWidget):
                 samples=" | ".join(f"{x['folder']!r}: {x['count']:,} e.g. {x['sample']}" for x in dbg)
                 self.status.setText(f"Loaded {len(models):,} models • scanned 0 textures for {folder} • DB matches: {samples or 'none'}")
         finally:self.load_button.setEnabled(True)
+    @staticmethod
+    def template_model_name(filename):
+        import re
+        m=re.match(r"^t(\\d{3}[a-z0-9]+?)(?:_|\\.)",str(filename),re.IGNORECASE)
+        return f"m{m.group(1).lower()}.model" if m else None
+
+    @staticmethod
+    def layout_signature(path):
+        try:
+            from PIL import Image,ImageFilter,ImageStat
+            im=open_texture_image(path).convert("RGBA").resize((64,64),Image.Resampling.BILINEAR)
+            rgb=im.convert("L").filter(ImageFilter.FIND_EDGES);alpha=im.getchannel("A");vals=[]
+            for src in (rgb,alpha):
+                for y in range(0,64,8):
+                    for x in range(0,64,8):
+                        vals.append(ImageStat.Stat(src.crop((x,y,x+8,y+8))).mean[0]/255.0)
+            return vals
+        except Exception:return None
+
+    @staticmethod
+    def signature_similarity(a,b):
+        if not a or not b or len(a)!=len(b):return 0.0
+        import math
+        rms=math.sqrt(sum((x-y)**2 for x,y in zip(a,b))/len(a))
+        return max(0.0,1.0-rms)
+
+    def classify_templates(self,textures):
+        refs=[]
+        for t in textures:
+            model=self.template_model_name(t["filename"])
+            if not model:continue
+            sig=self.layout_signature(t["path"])
+            if sig:refs.append({"filename":t["filename"],"path":t["path"],"model":model,"sig":sig})
+        self.template_refs=refs;self.template_assignments={}
+        for pid,paths in self.sets:
+            body=next((p for p in paths if (self.product_id(Path(p).name) or (None,None))[1]==1),None)
+            sig=self.layout_signature(body) if body else None
+            scored=sorted(((self.signature_similarity(sig,r["sig"]),r) for r in refs),key=lambda x:x[0],reverse=True)
+            if scored:
+                best,r=scored[0];second=scored[1][0] if len(scored)>1 else 0.0
+                if best>=0.84 and best-second>=0.015:
+                    self.template_assignments[pid]={"model":r["model"],"template":r["filename"],"score":best,"margin":best-second}
+
     def compatible_sets(self,model=None):
-        # Do not infer product/model compatibility without authoritative evidence.
-        # A folder can contain several templates/custom models.
-        return self.sets if (model or self.current_model()) else []
+        model=model or self.current_model()
+        if not model:return []
+        target=Path(model["filename"]).name.lower()
+        return [x for x in self.sets if self.template_assignments.get(x[0],{}).get("model")==target]
 
     def discover(self):
         groups={};textures=self.db.textures_in_folder(self.folder_name(),100000);self.raw_texture_count=len(textures)
@@ -442,6 +486,7 @@ class VehicleVariantsPage(QWidget):
             if not parsed:continue
             pid,slot=parsed;groups.setdefault(pid,{})[slot]=t["path"]
         self.sets=[(pid,[slots[k] for k in sorted(slots)]) for pid,slots in sorted(groups.items(),key=lambda x:int(x[0]))]
+        self.classify_templates(textures)
 
     def current_model(self):
         d=self.model_box.currentData();return d if d else None
@@ -454,12 +499,15 @@ class VehicleVariantsPage(QWidget):
                 cached+=1;card=QFrame();card.setObjectName("card");v=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);pix=QPixmap(str(p));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation));v.addWidget(im)
                 n=QLabel(f"PID {pid} • {len(paths)} texture(s)");n.setAlignment(Qt.AlignCenter);v.addWidget(n)
                 buttons=QHBoxLayout();tex=QPushButton("Open Texture Set");tex.clicked.connect(lambda _,pp=paths:self.open_textures(pp));delete=QPushButton("Delete Render");delete.clicked.connect(lambda _,pp=paths:self.delete_variant(pp));buttons.addWidget(tex);buttons.addWidget(delete);v.addLayout(buttons);grid.addWidget(card,shown//4,shown%4);shown+=1
-        if not shown:grid.addWidget(QLabel("No compatible variant renders yet. Choose a model and click Render Missing Variants."),0,0)
+        if not shown:grid.addWidget(QLabel("No mapped variant renders yet for this model. Choose a model with a recognized template family."),0,0)
         self.area.setWidget(host)
         compatible=self.compatible_sets(self.model)
+        mapped=len(self.template_assignments);unmapped=len(self.sets)-mapped
         if self.model:
-            self.compatibility.setText(f"Selected render model: {self.model['filename']} • Compatibility is NOT inferred from folder membership. Verify the model/template before rendering.")
-        self.status.setText(f"{len(self.sets):,} PID texture sets discovered • {cached:,} rendered for selected model")
+            refs=[r for r in self.template_refs if r["model"]==Path(self.model["filename"]).name.lower()]
+            refnames=", ".join(r["filename"] for r in refs[:3]) or "no named template reference"
+            self.compatibility.setText(f"Template Intelligence • {len(compatible):,} PID sets mapped to {self.model['filename']} • reference: {refnames} • {unmapped:,} uncertain/unmapped excluded")
+        self.status.setText(f"{len(self.sets):,} PID sets • {mapped:,} confidently mapped • {unmapped:,} unmapped • {cached:,} rendered for selected model")
     def delete_variant(self,paths):
         if not self.model:return
         remove_cached_variant(self.model["path"],paths);self.refresh()
@@ -501,7 +549,7 @@ class VehicleVariantsPage(QWidget):
         missing=[x for x in self.compatible_sets(self.model) if not cached_variant_thumbnail(self.model["path"],x[1])]
         if not missing:self.status.setText("All discovered texture sets are already rendered on this model.");return
         model_name=self.model.get("filename",Path(self.model["path"]).name)
-        answer=QMessageBox.question(self,"Confirm Variant Model",f"Render {len(missing):,} texture sets on {model_name}?\\n\\nThis folder may contain multiple templates/custom models. Inspector will not guess compatibility until it has authoritative mapping evidence.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        answer=QMessageBox.question(self,"Confirm Variant Model",f"Render {len(missing):,} texture sets on {model_name}?\\n\\nInspector will render only texture sets confidently matched to this model's named template family. Uncertain/unmapped sets are excluded.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer!=QMessageBox.Yes:return
         self.progress.setRange(0,len(missing));self.progress.setValue(0);self.progress.setFormat("%v / %m • %p%");self.render_button.setEnabled(False);self.cancel_button.setEnabled(True);worker_count=int(self.workers.currentText());engine_name="persistent" if self.engine.currentIndex()==0 else "one-shot";self.status.setText(f"Starting {engine_name} render • {len(missing):,} missing variants • {worker_count} worker(s)…");self.task=VariantRenderTask(self.model,missing,worker_count,self.engine.currentIndex()==0);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,pid,rate,remaining):
