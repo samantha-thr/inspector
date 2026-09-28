@@ -6,13 +6,13 @@ from PySide6.QtCore import Qt, QSettings, QThread, Signal
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import *
 from config import APP_NAME, DATABASE_PATH, DEFAULT_SCAN_PATH
+from there_texture_decoder import open_texture_image
 from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_conversion_job, inspect_conversion_source, prepare_conversion_job
 from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION, cached_variant_thumbnail, render_model_variant, remove_cached_variant
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
-        from PIL import Image
-        img=Image.open(path); img.load(); rgba=img.convert("RGBA")
+        img=open_texture_image(path); rgba=img.convert("RGBA")
         data=rgba.tobytes("raw","RGBA")
         q=QImage(data,rgba.width,rgba.height,QImage.Format_RGBA8888).copy()
         return QPixmap.fromImage(q).scaled(max_w,max_h,Qt.KeepAspectRatio,Qt.SmoothTransformation)
@@ -24,7 +24,7 @@ def texture_pixmap(path, max_w=560, max_h=440):
 def texture_diff_pixmap(path_a,path_b,max_w=900,max_h=220):
     try:
         from PIL import Image, ImageChops, ImageEnhance, ImageStat
-        a=Image.open(path_a).convert("RGBA"); b=Image.open(path_b).convert("RGBA")
+        a=open_texture_image(path_a).convert("RGBA"); b=open_texture_image(path_b).convert("RGBA")
         if a.size!=b.size:b=b.resize(a.size,Image.Resampling.LANCZOS)
         diff=ImageChops.difference(a,b)
         stat=ImageStat.Stat(diff.convert("RGB")); mean=sum(stat.mean)/3.0
