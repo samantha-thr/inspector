@@ -642,9 +642,16 @@ def _resolve_material_textures(
             else:
                 unslotted.append(p)
         if slotted:
-            for material in model.materials:
-                if material.index in slotted:
-                    assignments[material.index] = slotted[material.index]
+            # There buggy products use _1 for the body and _3/_4 as the
+            # window colour/opacity pair.  _3 and _4 are texture channels
+            # for the same window material, not independent material slots.
+            if 0 in slotted and 2 in slotted and 3 in slotted and len(model.materials) >= 2:
+                assignments[0] = slotted[0]
+                assignments[1] = slotted[2]
+            else:
+                for material in model.materials:
+                    if material.index in slotted:
+                        assignments[material.index] = slotted[material.index]
         else:
             for material,p in zip(model.materials,sorted(unslotted,key=lambda x:x.name.lower())):
                 assignments[material.index] = p
@@ -797,6 +804,11 @@ def export_obj(
         texture = texture_assignments.get(material.index)
         if texture:
             mtl_lines.append(f"map_Kd {texture.resolve().as_posix()}")
+        # Buggy _4 is the opacity companion to the _3 window colour map.
+        if material.index == 1 and linked:
+            slot4 = next((p for p in linked if re.match(r"^\\d+_4\\.", p.name, re.IGNORECASE)), None)
+            if slot4:
+                mtl_lines.append(f"map_d {slot4.resolve().as_posix()}")
         mtl_lines.append("")
 
     mtl_path.write_text("\n".join(mtl_lines), encoding="utf-8")
