@@ -319,7 +319,7 @@ class VehicleVariantsPage(QWidget):
     def __init__(self,db):
         super().__init__();self.db=db;self.task=None;self.sets=[];self.model=None;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
-        r=QHBoxLayout();self.folder=QLineEdit("bg");self.model_box=QComboBox();load=QPushButton("Load Folder");load.clicked.connect(self.load_folder)
+        r=QHBoxLayout();self.folder=QLineEdit("bg");self.model_box=QComboBox();load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
         self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing)
         for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Workers"),self.workers,render):r.addWidget(w)
         b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
