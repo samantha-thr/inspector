@@ -384,7 +384,7 @@ class VehicleVariantsPage(QWidget):
         self.populate_folders()
         for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Template"),self.template_box):select_row.addWidget(w)
         select_row.setStretch(1,2);select_row.setStretch(4,2);select_row.setStretch(6,2);b.addLayout(select_row)
-        action_row=QHBoxLayout();self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.engine=QComboBox();self.engine.addItems(["Persistent (fast)","One-shot (safe)"]);self.engine.setMinimumWidth(140);render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing);self.render_button=render
+        action_row=QHBoxLayout();self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.engine=QComboBox();self.engine.addItems(["Persistent (fast)","One-shot (safe)"]);self.engine.setMinimumWidth(140);render=QPushButton("Render Classified Variants");render.clicked.connect(self.render_missing);self.render_button=render
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
@@ -509,12 +509,12 @@ class VehicleVariantsPage(QWidget):
                 cached+=1;card=QFrame();card.setObjectName("card");v=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);pix=QPixmap(str(p));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation));v.addWidget(im)
                 n=QLabel(f"PID {pid} • {len(paths)} texture(s)");n.setAlignment(Qt.AlignCenter);v.addWidget(n)
                 buttons=QHBoxLayout();tex=QPushButton("Open Texture Set");tex.clicked.connect(lambda _,pp=paths:self.open_textures(pp));delete=QPushButton("Delete Render");delete.clicked.connect(lambda _,pp=paths:self.delete_variant(pp));buttons.addWidget(tex);buttons.addWidget(delete);v.addLayout(buttons);grid.addWidget(card,shown//4,shown%4);shown+=1
-        if not shown:grid.addWidget(QLabel("No rendered variants yet for the selected model/template pair."),0,0)
+        if not shown:grid.addWidget(QLabel("Automatic rendering is locked while template classification is being validated."),0,0)
         self.area.setWidget(host)
         compatible=self.compatible_sets(self.model);scored=len(self.template_assignments);unscored=len(self.sets)-scored
         template_name=self.template_box.currentText() if self.template_box.currentData() else None
         if self.model and template_name:
-            self.compatibility.setText(f"Template Intelligence • {len(compatible):,} PID sets match {template_name} → render on {self.model['filename']} • direct similarity ≥ 78%")
+            self.compatibility.setText(f"Template Analysis (experimental) • {len(compatible):,} candidates score ≥78% vs {template_name} • NOT validated for {self.model['filename']}")
         elif self.model:
             self.compatibility.setText(f"Choose the reference template that belongs to {self.model['filename']}. Inspector will not infer template→model relationships.")
         self.status.setText(f"{len(self.sets):,} PID sets • {scored:,} analyzed • {len(compatible):,} match selected template • {unscored:,} could not be scored • {cached:,} rendered")
@@ -559,8 +559,7 @@ class VehicleVariantsPage(QWidget):
         compatible=self.compatible_sets(self.model)
         if not self.template_box.currentData():
             QMessageBox.warning(self,APP_NAME,"Choose the reference template that belongs to the selected model before rendering.");return
-        if not compatible:
-            self.status.setText("No PID texture sets confidently match the selected reference template.");return
+        QMessageBox.warning(self,APP_NAME,"Automatic template classification is temporarily in analysis-only mode.\n\nThe current coarse similarity metric is not selective enough to safely decide which PID sets belong on this model. No render batch was started.");return
         missing=[x for x in compatible if not cached_variant_thumbnail(self.model["path"],x[1])]
         if not missing:self.status.setText("All mapped texture sets for this model/template are already rendered.");return
         model_name=self.model.get("filename",Path(self.model["path"]).name)
