@@ -3,6 +3,7 @@ import hashlib, struct
 from pathlib import Path
 from typing import Any
 from utils import file_hashes
+from there_texture_decoder import open_texture_image
 
 try:
     from PIL import Image, ImageFilter, ImageStat
@@ -13,7 +14,7 @@ except Exception:
 
 DDS_FORMATS = {
     "DXT1": ("DXT1 / BC1", 8), "DXT2": ("DXT2", 16), "DXT3": ("DXT3 / BC2", 16),
-    "DXT4": ("DXT4", 16), "DXT5": ("DXT5 / BC3", 16), "ATI1": ("ATI1 / BC4", 8),
+    "DXT4": ("DXT4", 16), "DXT5": ("DXT5 / BC3", 16), "DXA5": ("There DXA5 / alpha mask", 8), "ATI1": ("ATI1 / BC4", 8),
     "BC4U": ("BC4U", 8), "BC4S": ("BC4S", 8), "ATI2": ("ATI2 / BC5", 16),
     "BC5U": ("BC5U", 16), "BC5S": ("BC5S", 16), "DX10": ("DX10 Extended", 0),
 }
@@ -42,7 +43,7 @@ def parse_dds(path: Path) -> dict[str, Any]:
         fmt, block_size = DDS_FORMATS.get(fourcc, ("", 0))
         if not fmt:
             fmt = f"Uncompressed RGB/RGBA {rgb_bits}-bit" if pf_flags & 0x40 else (f"FOURCC {fourcc}" if fourcc else "Unknown DDS pixel format")
-        has_alpha = 1 if (pf_flags & 0x1 or amask != 0 or fourcc in ("DXT2", "DXT3", "DXT4", "DXT5")) else 0
+        has_alpha = 1 if (pf_flags & 0x1 or amask != 0 or fourcc in ("DXT2", "DXT3", "DXT4", "DXT5", "DXA5")) else 0
         if block_size:
             estimated = max(1, (width + 3) // 4) * max(1, (height + 3) // 4) * block_size
         elif rgb_bits:
@@ -97,8 +98,8 @@ def analyze_texture(path: Path) -> dict[str, Any]:
         result["analysis_status"] = "pillow_not_installed"
         return result
     try:
-        with Image.open(path) as img:
-            img.load()
+        img = open_texture_image(path)
+        try:
             result["width"] = int(img.width)
             result["height"] = int(img.height)
             result["mode"] = str(img.mode)
@@ -124,6 +125,9 @@ def analyze_texture(path: Path) -> dict[str, Any]:
             edge_pixels = list(edges.getdata())
             result["edge_density"] = sum(1 for x in edge_pixels if x > 32) / max(len(edge_pixels), 1)
             result["analysis_status"] = "ok"
+        finally:
+            try: img.close()
+            except Exception: pass
     except Exception as exc:
         result["analysis_status"] = f"dds_header_only:{type(exc).__name__}" if result["is_dds"] else f"image_error:{type(exc).__name__}"
     return result
