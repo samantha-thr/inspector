@@ -1,6 +1,6 @@
 from __future__ import annotations
 import json, os, subprocess, time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from pathlib import Path
 from PySide6.QtCore import Qt, QSettings, QThread, Signal
 from PySide6.QtGui import QPixmap, QImage
@@ -301,27 +301,46 @@ class VariantRenderTask(QThread):
     progress=Signal(int,int,str,float,float);done=Signal(object)
     def __init__(self,model,sets,workers=2):
         super().__init__();self.model=model;self.sets=sets;self.workers=max(1,workers);self.cancelled=False;self.cancel_event=threading.Event()
-    def cancel(self):self.cancelled=True;self.cancel_event.set()
+    def cancel(self): self.cancelled=True;self.cancel_event.set()
     def run(self):
         ok=failed=cached=0;completed=0;total=len(self.sets);started=time.monotonic()
         def one(item):
             pid,paths=item
             if self.cancel_event.is_set(): return pid,{"success":False,"cancelled":True}
-            r=render_model_variant(self.model["path"],paths,512,False,self.cancel_event);return pid,r
-        with ThreadPoolExecutor(max_workers=self.workers) as pool:
-            fs={pool.submit(one,x):x for x in self.sets}
-            for future in as_completed(fs):
-                if self.cancelled:
-                    for pending in fs:pending.cancel()
-                    break
-                pid,r=future.result()
-                if r.get("cancelled"): continue
-                completed+=1
-                if r.get("cached"):cached+=1
-                elif r.get("success"):ok+=1
-                else:failed+=1
-                elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
-                self.progress.emit(completed,total,pid,rate,remaining)
+            return pid,render_model_variant(self.model["path"],paths,512,False,self.cancel_event)
+        pool=ThreadPoolExecutor(max_workers=self.workers)
+        futures={}
+        try:
+            # Keep only one wave of work submitted. This prevents Executor's
+            # internal queue from owning the entire 1,700-item batch.
+            iterator=iter(self.sets)
+            for _ in range(self.workers):
+                try:
+                    item=next(iterator);futures[pool.submit(one,item)]=item
+                except StopIteration: break
+            while futures and not self.cancel_event.is_set():
+                done,_=wait(tuple(futures),timeout=.20,return_when=FIRST_COMPLETED)
+                if not done: continue
+                for future in done:
+                    futures.pop(future,None)
+                    try: pid,r=future.result()
+                    except Exception as exc:
+                        pid="error";r={"success":False,"message":str(exc)}
+                    if r.get("cancelled"): continue
+                    completed+=1
+                    if r.get("cached"): cached+=1
+                    elif r.get("success"): ok+=1
+                    else: failed+=1
+                    elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
+                    self.progress.emit(completed,total,pid,rate,remaining)
+                    if not self.cancel_event.is_set():
+                        try:
+                            item=next(iterator);futures[pool.submit(one,item)]=item
+                        except StopIteration: pass
+            if self.cancel_event.is_set():
+                for future in futures: future.cancel()
+        finally:
+            pool.shutdown(wait=True,cancel_futures=True)
         self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"cancelled":self.cancelled,"completed":completed})
 
 class VehicleVariantsPage(QWidget):
@@ -398,7 +417,7 @@ class VehicleVariantsPage(QWidget):
 
     def cancel_render(self):
         if self.task and self.task.isRunning():
-            self.task.cancel();self.cancel_button.setEnabled(False);self.status.setText("Stopping… active Blender renders will finish; queued variants will be cancelled.")
+            self.task.cancel();self.cancel_button.setEnabled(False);self.status.setText("Stopping now… active Blender processes are being terminated and no new variants will start.")
 
     def open_textures(self,paths):
         d=QDialog(self);d.setWindowTitle("Texture Set");d.resize(900,650);lay=QGridLayout(d)
@@ -409,6 +428,8 @@ class VehicleVariantsPage(QWidget):
             lay.addWidget(TextureThumb(p,Path(p).name,subtitle),i//3,i%3)
         d.exec()
     def render_missing(self):
+        if self.task and self.task.isRunning():
+            self.status.setText("A render batch is still stopping. Wait for Stopped before starting again.");return
         self.model=self.current_model()
         if not self.model:return
         missing=[x for x in self.sets if not cached_variant_thumbnail(self.model["path"],x[1])]
@@ -417,7 +438,7 @@ class VehicleVariantsPage(QWidget):
     def on_progress(self,i,total,pid,rate,remaining):
         self.progress.setValue(i);self.status.setText(f"Rendering {i:,} / {total:,} • PID {pid} • {rate:.2f}/sec • ETA {ThumbnailBatchTask._fmt(remaining)}")
     def finished(self,result):
-        self.render_button.setEnabled(True);self.cancel_button.setEnabled(False);self.refresh()
+        self.render_button.setEnabled(True);self.cancel_button.setEnabled(False);self.task=None;self.refresh()
         if result.get("cancelled"):
             self.status.setText(f"Stopped • completed {result['completed']:,} • rendered {result['rendered']:,} • failed {result['failed']:,}")
         else:
