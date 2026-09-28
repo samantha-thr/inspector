@@ -300,19 +300,23 @@ class ThumbnailStudio(QWidget):
 class VariantRenderTask(QThread):
     progress=Signal(int,int,str,float,float);done=Signal(object)
     def __init__(self,model,sets,workers=2):
-        super().__init__();self.model=model;self.sets=sets;self.workers=max(1,workers);self.cancelled=False
-    def cancel(self):self.cancelled=True
+        super().__init__();self.model=model;self.sets=sets;self.workers=max(1,workers);self.cancelled=False;self.cancel_event=threading.Event()
+    def cancel(self):self.cancelled=True;self.cancel_event.set()
     def run(self):
         ok=failed=cached=0;completed=0;total=len(self.sets);started=time.monotonic()
         def one(item):
-            pid,paths=item;r=render_model_variant(self.model["path"],paths,512,False);return pid,r
+            pid,paths=item
+            if self.cancel_event.is_set(): return pid,{"success":False,"cancelled":True}
+            r=render_model_variant(self.model["path"],paths,512,False,self.cancel_event);return pid,r
         with ThreadPoolExecutor(max_workers=self.workers) as pool:
             fs={pool.submit(one,x):x for x in self.sets}
             for future in as_completed(fs):
                 if self.cancelled:
                     for pending in fs:pending.cancel()
                     break
-                pid,r=future.result();completed+=1
+                pid,r=future.result()
+                if r.get("cancelled"): continue
+                completed+=1
                 if r.get("cached"):cached+=1
                 elif r.get("success"):ok+=1
                 else:failed+=1
