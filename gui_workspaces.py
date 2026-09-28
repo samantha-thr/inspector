@@ -470,20 +470,24 @@ class VehicleVariantsPage(QWidget):
             idx=self.template_box.findData(previous)
             if idx>=0:self.template_box.setCurrentIndex(idx)
         self.template_box.blockSignals(False)
+        # Keep scores against every reference. Several stock templates can share one
+        # geometry/UV family, so choosing a single global winner is incorrect.
         for pid,paths in self.sets:
             body=next((p for p in paths if (self.product_id(Path(p).name) or (None,None))[1]==1),None)
             sig=self.layout_signature(body) if body else None
-            scored=sorted(((self.signature_similarity(sig,r["sig"]),r) for r in refs),key=lambda x:x[0],reverse=True)
-            if scored:
-                best,r=scored[0];second=scored[1][0] if len(scored)>1 else 0.0
-                if best>=0.84 and best-second>=0.015:
-                    self.template_assignments[pid]={"template_path":r["path"],"template":r["filename"],"score":best,"margin":best-second}
+            if not sig:continue
+            scores={}
+            for r in refs:scores[r["path"]]=self.signature_similarity(sig,r["sig"])
+            self.template_assignments[pid]={"scores":scores}
 
     def compatible_sets(self,model=None):
         if not (model or self.current_model()):return []
         template_path=self.template_box.currentData()
         if not template_path:return []
-        return [x for x in self.sets if self.template_assignments.get(x[0],{}).get("template_path")==template_path]
+        # Directly compare against the selected reference. Do not make same-family
+        # templates eliminate one another in a winner-take-all contest.
+        threshold=0.78
+        return [x for x in self.sets if self.template_assignments.get(x[0],{}).get("scores",{}).get(template_path,0.0)>=threshold]
 
     def discover(self):
         groups={};textures=self.db.textures_in_folder(self.folder_name(),100000);self.raw_texture_count=len(textures)
@@ -505,15 +509,15 @@ class VehicleVariantsPage(QWidget):
                 cached+=1;card=QFrame();card.setObjectName("card");v=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);pix=QPixmap(str(p));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation));v.addWidget(im)
                 n=QLabel(f"PID {pid} • {len(paths)} texture(s)");n.setAlignment(Qt.AlignCenter);v.addWidget(n)
                 buttons=QHBoxLayout();tex=QPushButton("Open Texture Set");tex.clicked.connect(lambda _,pp=paths:self.open_textures(pp));delete=QPushButton("Delete Render");delete.clicked.connect(lambda _,pp=paths:self.delete_variant(pp));buttons.addWidget(tex);buttons.addWidget(delete);v.addLayout(buttons);grid.addWidget(card,shown//4,shown%4);shown+=1
-        if not shown:grid.addWidget(QLabel("No mapped variant renders yet for this model. Choose a model with a recognized template family."),0,0)
+        if not shown:grid.addWidget(QLabel("No rendered variants yet for the selected model/template pair."),0,0)
         self.area.setWidget(host)
-        compatible=self.compatible_sets(self.model);mapped=len(self.template_assignments);unmapped=len(self.sets)-mapped
+        compatible=self.compatible_sets(self.model);scored=len(self.template_assignments);unscored=len(self.sets)-scored
         template_name=self.template_box.currentText() if self.template_box.currentData() else None
         if self.model and template_name:
-            self.compatibility.setText(f"Template Intelligence • {len(compatible):,} PID sets match {template_name} → render on {self.model['filename']} • {unmapped:,} uncertain/unmapped excluded")
+            self.compatibility.setText(f"Template Intelligence • {len(compatible):,} PID sets match {template_name} → render on {self.model['filename']} • direct similarity ≥ 78%")
         elif self.model:
             self.compatibility.setText(f"Choose the reference template that belongs to {self.model['filename']}. Inspector will not infer template→model relationships.")
-        self.status.setText(f"{len(self.sets):,} PID sets • {mapped:,} confidently classified by template • {unmapped:,} unmapped • {cached:,} rendered for this model/template")
+        self.status.setText(f"{len(self.sets):,} PID sets • {scored:,} analyzed • {len(compatible):,} match selected template • {unscored:,} could not be scored • {cached:,} rendered")
     def delete_variant(self,paths):
         if not self.model:return
         remove_cached_variant(self.model["path"],paths);self.refresh()
