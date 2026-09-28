@@ -360,9 +360,17 @@ class Database:
         FROM model_texture_links l JOIN textures t ON t.path=l.texture_path WHERE model_path=? ORDER BY score DESC LIMIT ?""", (model_path, limit)).fetchall()
 
     def textures_in_folder(self, folder, limit=100000):
-        return self.db.execute("""SELECT * FROM textures
-            WHERE lower(trim(replace(folder,'/','\\'),'\\'))=lower(trim(replace(?,'/','\\'),'\\'))
-            ORDER BY filename LIMIT ?""",(folder,limit)).fetchall()
+        key=str(folder or "").strip().replace("/","\\").strip("\\").lower()
+        rows=self.db.execute("""SELECT * FROM textures
+            WHERE lower(folder)=? OR lower(folder) LIKE ? OR lower(relative_path) LIKE ?
+            ORDER BY filename LIMIT ?""",(key,f"%\\{key}",f"{key}\\%",limit)).fetchall()
+        return rows
+
+    def texture_folder_debug(self, term="bg", limit=20):
+        like=f"%{term}%"
+        return self.db.execute("""SELECT folder,COUNT(*) count,MIN(filename) sample
+            FROM textures WHERE folder LIKE ? OR relative_path LIKE ?
+            GROUP BY folder ORDER BY count DESC LIMIT ?""",(like,like,limit)).fetchall()
 
     def models_in_folder(self, folder, limit=10000):
         return self.db.execute("""SELECT * FROM models WHERE folder=? ORDER BY filename LIMIT ?""",(folder,limit)).fetchall()
