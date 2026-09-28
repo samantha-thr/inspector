@@ -85,6 +85,7 @@ for mat in bpy.data.materials:
     bsdf=mat.node_tree.nodes.get("Principled BSDF")
     texnodes=[n for n in mat.node_tree.nodes if n.type=="TEX_IMAGE" and n.image]
     if bsdf and texnodes:
+        if any(n.label=="There _4 Window Opacity" for n in texnodes): continue
         tex=texnodes[0]
         try:
             mat.node_tree.links.new(tex.outputs["Alpha"],bsdf.inputs["Alpha"])
