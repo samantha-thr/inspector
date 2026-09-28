@@ -87,6 +87,7 @@ class DecodedMaterial:
     map_mask: int
     bool_values: int
     textures: list[str] = field(default_factory=list)
+    texture_maps: dict[int, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -300,9 +301,12 @@ def decode_model(path: str | Path) -> DecodedModel:
             reader.read_uint(width=24)
 
         textures: list[str] = []
+        texture_maps: dict[int, str] = {}
         for map_bit in range(7):
             if map_mask & (1 << map_bit):
-                textures.append(reader.read_text(width=7, end=48))
+                tex = reader.read_text(width=7, end=48)
+                textures.append(tex)
+                texture_maps[map_bit] = tex
 
         # Current exporter writes zero here. Preserve forward compatibility by
         # recording it, but version 10 has no known payload associated with it.
@@ -323,6 +327,7 @@ def decode_model(path: str | Path) -> DecodedModel:
                 map_mask=map_mask,
                 bool_values=bool_values,
                 textures=textures,
+                texture_maps=texture_maps,
             )
         )
 
@@ -629,29 +634,38 @@ def _resolve_material_textures(
     assignments: dict[int, Path | None] = {m.index: None for m in model.materials}
 
     if linked:
-        # Preserve There product texture slot numbers.  A set such as
-        # _1/_3/_4 must map to material slots 0/2/3; never collapse it to
-        # three sequential materials merely because _2 is absent.
+        # Preserve There product texture suffixes, but map them by the model's
+        # actual There material semantics rather than by material ordinal.
+        # There map bits: 0=color, 1=opacity, 2=cutout, 3=lighting/detail,
+        # 4=gloss, 5=emission, 6=normal.
         import re
-        slotted = {}
+        product_slots = {}
         unslotted = []
         for p in linked:
             match = re.match(r"^\\d+_([1-9]\\d*)\\.", p.name, re.IGNORECASE)
-            if match:
-                slotted[int(match.group(1)) - 1] = p
-            else:
-                unslotted.append(p)
-        if slotted:
-            # There buggy products use _1 for the body and _3/_4 as the
-            # window colour/opacity pair.  _3 and _4 are texture channels
-            # for the same window material, not independent material slots.
-            if 0 in slotted and 2 in slotted and 3 in slotted and len(model.materials) >= 2:
-                assignments[0] = slotted[0]
-                assignments[1] = slotted[2]
-            else:
-                for material in model.materials:
-                    if material.index in slotted:
-                        assignments[material.index] = slotted[material.index]
+            if match: product_slots[int(match.group(1))] = p
+            else: unslotted.append(p)
+
+        if product_slots:
+            window_material = next((m for m in model.materials
+                                    if (m.map_mask & (1 << 0)) and (m.map_mask & (1 << 1))), None)
+            body_material = next((m for m in model.materials
+                                  if (m.map_mask & (1 << 0)) and not (m.map_mask & ((1 << 1) | (1 << 2)))), None)
+            if body_material is None and model.materials:
+                body_material = model.materials[0]
+            if 1 in product_slots and body_material:
+                assignments[body_material.index] = product_slots[1]
+            if 3 in product_slots and window_material:
+                assignments[window_material.index] = product_slots[3]
+            # Generic fallback for non-buggy product sets.
+            for slot,p in product_slots.items():
+                if slot in (1,3,4): continue
+                idx=slot-1
+                if idx in assignments and assignments[idx] is None: assignments[idx]=p
+            # Older buggy models may not expose opacity semantics. Preserve
+            # compatibility with the previous two-material convention.
+            if 3 in product_slots and window_material is None and len(model.materials)>=2:
+                assignments[model.materials[1].index]=product_slots[3]
         else:
             for material,p in zip(model.materials,sorted(unslotted,key=lambda x:x.name.lower())):
                 assignments[material.index] = p
@@ -804,8 +818,9 @@ def export_obj(
         texture = texture_assignments.get(material.index)
         if texture:
             mtl_lines.append(f"map_Kd {texture.resolve().as_posix()}")
-        # Buggy _4 is the opacity companion to the _3 window colour map.
-        if material.index == 1 and linked:
+        # Product _4 is the opacity companion for a material whose There
+        # map mask explicitly contains both COLOR(bit 0) and OPACITY(bit 1).
+        if (material.map_mask & 0x03) == 0x03 and linked:
             slot4 = next((p for p in linked if re.match(r"^\\d+_4\\.", p.name, re.IGNORECASE)), None)
             if slot4:
                 mtl_lines.append(f"map_d {slot4.resolve().as_posix()}")
@@ -824,6 +839,7 @@ def export_obj(
         "triangles": model.triangle_count,
         "collision": model.collision is not None,
         "materials": len(model.materials),
+        "material_details": [{"index":m.index,"name":m.name,"bool_mask":m.bool_mask,"bool_values":m.bool_values,"map_mask":m.map_mask,"map_bits":[b for b in range(7) if m.map_mask & (1<<b)],"texture_maps":dict(m.texture_maps)} for m in model.materials],
         "nodes": len(model.nodes),
     }
 
