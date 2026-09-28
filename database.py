@@ -359,6 +359,12 @@ class Database:
         return self.db.execute("""SELECT l.*, t.relative_path texture_relative_path, t.dds_format, t.width, t.height, t.dds_width, t.dds_height, t.sha256 texture_sha256, t.ahash
         FROM model_texture_links l JOIN textures t ON t.path=l.texture_path WHERE model_path=? ORDER BY score DESC LIMIT ?""", (model_path, limit)).fetchall()
 
+    def textures_in_folder(self, folder, limit=100000):
+        return self.db.execute("""SELECT * FROM textures WHERE folder=? ORDER BY filename LIMIT ?""",(folder,limit)).fetchall()
+
+    def models_in_folder(self, folder, limit=10000):
+        return self.db.execute("""SELECT * FROM models WHERE folder=? ORDER BY filename LIMIT ?""",(folder,limit)).fetchall()
+
     def links_for_texture(self, texture_path, limit=100):
         return self.db.execute("""SELECT l.*, m.relative_path model_relative_path, m.folder FROM model_texture_links l JOIN models m ON m.path=l.model_path WHERE texture_path=? ORDER BY score DESC LIMIT ?""", (texture_path, limit)).fetchall()
 
