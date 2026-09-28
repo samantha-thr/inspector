@@ -375,7 +375,8 @@ class VehicleVariantsPage(QWidget):
     def __init__(self,db):
         super().__init__();self.db=db;self.task=None;self.sets=[];self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
-        r=QHBoxLayout();self.folder=QLineEdit("bg");self.model_box=QComboBox();load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
+        r=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(170);self.folder.setToolTip("Indexed asset folder");self.model_box=QComboBox();load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
+        self.populate_folders()
         self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.engine=QComboBox();self.engine.addItems(["Persistent (fast)","One-shot (safe)"]);render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing);self.render_button=render
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
@@ -383,13 +384,28 @@ class VehicleVariantsPage(QWidget):
         for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,render,self.cancel_button,self.failures_button,self.delete_all_button):r.addWidget(w)
         b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.load_folder()
+    def folder_name(self):
+        return (self.folder.currentData() or self.folder.currentText()).strip()
+
+    def populate_folders(self):
+        current=self.folder_name() if self.folder.count() else "bg"
+        self.folder.blockSignals(True);self.folder.clear()
+        rows=self.db.asset_folders()
+        for row in rows:
+            folder=row["folder"];mc=int(row["model_count"] or 0);tc=int(row["texture_count"] or 0)
+            self.folder.addItem(f"{folder}   •   {mc:,} models / {tc:,} textures",folder)
+        idx=self.folder.findData(current)
+        if idx<0:idx=self.folder.findData("bg")
+        if idx>=0:self.folder.setCurrentIndex(idx)
+        self.folder.blockSignals(False)
+
     @staticmethod
     def product_id(name):
         import re
         m=re.match(r"^(\d+)_([1-9]\d*)\.",str(name),re.IGNORECASE)
         return (m.group(1),int(m.group(2))) if m else None
     def load_folder(self):
-        folder=self.folder.text().strip();previous=self.model_box.currentText()
+        folder=self.folder_name();previous=self.model_box.currentText()
         self.status.setText(f"Loading {folder}…");self.load_button.setEnabled(False);QApplication.processEvents()
         try:
             models=self.db.models_in_folder(folder,10000);self.model_box.blockSignals(True);self.model_box.clear()
@@ -406,7 +422,7 @@ class VehicleVariantsPage(QWidget):
                 self.status.setText(f"Loaded {len(models):,} models • scanned 0 textures for {folder} • DB matches: {samples or 'none'}")
         finally:self.load_button.setEnabled(True)
     def discover(self):
-        groups={};textures=self.db.textures_in_folder(self.folder.text().strip(),100000);self.raw_texture_count=len(textures)
+        groups={};textures=self.db.textures_in_folder(self.folder_name(),100000);self.raw_texture_count=len(textures)
         for t in textures:
             parsed=self.product_id(t["filename"])
             if not parsed:continue
@@ -487,7 +503,7 @@ class VehicleVariantsPage(QWidget):
         if not self.last_failures:return
         path,_=QFileDialog.getSaveFileName(parent or self,"Export Failure Report","vehicle_variant_failures.json","JSON (*.json)")
         if not path:return
-        Path(path).write_text(json.dumps({"model":self.model.get("filename") if self.model else None,"folder":self.folder.text().strip(),"created":time.strftime("%Y-%m-%d %H:%M:%S"),"failures":self.last_failures},indent=2),encoding="utf-8")
+        Path(path).write_text(json.dumps({"model":self.model.get("filename") if self.model else None,"folder":self.folder_name(),"created":time.strftime("%Y-%m-%d %H:%M:%S"),"failures":self.last_failures},indent=2),encoding="utf-8")
         self.status.setText(f"Exported {len(self.last_failures):,} failures to {path}")
 
     def finished(self,result):
