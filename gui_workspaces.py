@@ -182,7 +182,7 @@ class ThumbnailBatchTask(QThread):
 
 class ThumbnailStudio(QWidget):
     def __init__(self,db):
-        super().__init__();self.db=db;self.task=None;self.cards=[];b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        super().__init__();self.db=db;self.task=None;self.cards=[];self.gallery_page=0;self.gallery_page_size=250;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Visual Library");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Build, browse and manage cached LOD0 renders for the indexed model library."))
         r=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Optional filename/folder/path filter");self.search.returnPressed.connect(self.refresh)
         self.count=QComboBox();self.count.addItems(["25","50","100","250","500","1000","All"]);self.count.setCurrentText("100")
@@ -190,9 +190,12 @@ class ThumbnailStudio(QWidget):
         self.view=QComboBox();self.view.addItems(["Cached only","All models","Missing renders","Failed renders"])
         go=QPushButton("Render Missing");go.clicked.connect(self.start);refresh=QPushButton("Refresh Gallery");refresh.clicked.connect(self.refresh)
         for w in (self.search,QLabel("Batch"),self.count,QLabel("Workers"),self.workers,QLabel("View"),self.view,go,refresh):r.addWidget(w)
-        self.view.currentIndexChanged.connect(self.refresh);self.count.currentIndexChanged.connect(self.refresh)
+        self.view.currentIndexChanged.connect(self.reset_gallery);self.count.currentIndexChanged.connect(self.reset_gallery);self.search.textChanged.connect(self.reset_gallery)
         b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
-        self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.refresh()
+        self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1)
+        nav=QHBoxLayout();self.gallery_prev=QPushButton("Previous 250");self.gallery_next=QPushButton("Next 250");self.gallery_page_label=QLabel()
+        self.gallery_prev.clicked.connect(self.prev_gallery);self.gallery_next.clicked.connect(self.next_gallery)
+        nav.addWidget(self.gallery_prev);nav.addWidget(self.gallery_next);nav.addWidget(self.gallery_page_label);nav.addStretch();b.addLayout(nav);self.refresh()
 
     def make_card(self,row,p):
         card=QFrame();card.setObjectName("card");card.setMinimumWidth(225);v=QVBoxLayout(card)
@@ -213,26 +216,47 @@ class ThumbnailStudio(QWidget):
             render=QPushButton("Render");render.clicked.connect(lambda _,rr=dict(row):self.render_one(rr));buttons.addWidget(render)
         v.addLayout(buttons);return card
 
+    def reset_gallery(self):
+        self.gallery_page=0;self.refresh()
+
+    def prev_gallery(self):
+        if self.gallery_page>0:self.gallery_page-=1;self.refresh()
+
+    def next_gallery(self):
+        self.gallery_page+=1;self.refresh()
+
+    def _matching_gallery_rows(self):
+        term=self.search.text().strip();mode=self.view.currentText();failed_map={x["model"]:x for x in thumbnail_failures(True)}
+        matches=[];offset=0;page_size=1000;total=0;cached_total=missing_total=0
+        while True:
+            rows,total=self.db.search_models_page(term,page_size,offset)
+            if not rows:break
+            for row in rows:
+                p=cached_thumbnail(row["path"])
+                if p:cached_total+=1
+                else:missing_total+=1
+                include=(mode=="All models" or (mode=="Cached only" and p) or (mode=="Missing renders" and not p) or (mode=="Failed renders" and row["path"] in failed_map))
+                if include:matches.append((row,p,failed_map.get(row["path"])))
+            offset+=len(rows)
+            if offset>=total:break
+        return matches,total,cached_total,missing_total
+
     def refresh(self):
-        limit=1000 if self.count.currentText()=="All" else int(self.count.currentText())
-        rows,total=self.db.search_models_page(self.search.text().strip(),limit,0)
-        host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0;cached_count=missing_count=0
-        mode=self.view.currentText()
-        failed_map={x["model"]:x for x in thumbnail_failures(True)}
-        for row in rows:
-            p=cached_thumbnail(row["path"])
-            if p:cached_count+=1
-            else:missing_count+=1
-            if mode=="Cached only" and not p:continue
-            if mode=="Missing renders" and p:continue
-            if mode=="Failed renders" and row["path"] not in failed_map:continue
+        matches,total,cached_total,missing_total=self._matching_gallery_rows()
+        pages=max(1,(len(matches)+self.gallery_page_size-1)//self.gallery_page_size)
+        if self.gallery_page>=pages:self.gallery_page=max(0,pages-1)
+        lo=self.gallery_page*self.gallery_page_size;hi=min(lo+self.gallery_page_size,len(matches));page=matches[lo:hi]
+        host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft)
+        for shown,(row,p,failure) in enumerate(page):
             card=self.make_card(row,p)
-            if mode=="Failed renders" and row["path"] in failed_map:
-                err=QLabel("FAILED: "+str(failed_map[row["path"]].get("message",""))[-240:]);err.setWordWrap(True);err.setToolTip(str(failed_map[row["path"]].get("message","")));card.layout().insertWidget(1,err)
-            grid.addWidget(card,shown//4,shown%4);shown+=1
-        if not shown:grid.addWidget(QLabel("No models match this view."),0,0)
-        self.area.setWidget(host)
-        self.status.setText(f"{shown:,} shown • {cached_count:,} cached • {missing_count:,} missing in current selection • {total:,} matching models")
+            if failure:
+                msg=str(failure.get("message",""));err=QLabel("FAILED: "+msg[-240:]);err.setWordWrap(True);err.setToolTip(msg);card.layout().insertWidget(1,err)
+            grid.addWidget(card,shown//4,shown%4)
+        if not page:grid.addWidget(QLabel("No models match this view."),0,0)
+        self.area.setWidget(host);self.area.verticalScrollBar().setValue(0)
+        self.gallery_prev.setEnabled(self.gallery_page>0);self.gallery_next.setEnabled(hi<len(matches))
+        self.gallery_page_label.setText(f"Page {self.gallery_page+1:,} of {pages:,} • showing {lo+1 if matches else 0:,}–{hi:,} of {len(matches):,} in this view")
+        self.status.setText(f"{len(matches):,} in view • {cached_total:,} cached • {missing_total:,} missing • {len(thumbnail_failures(True)):,} unresolved failures • {total:,} matching models")
 
     def remove_render(self,path):
         p=cached_thumbnail(path)
