@@ -219,6 +219,122 @@ except Exception as e:
     log=(stdout or "")+"\n"+(stderr or "");success=proc.returncode==0 and out.exists()
     return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:]}
 
+
+class PersistentVariantWorker:
+    """Long-lived Blender process for high-throughput vehicle variant renders."""
+    def __init__(self,model_path,seed_texture_paths,size=512,cancel_event=None,worker_id=0):
+        import re
+        self.model_path=Path(model_path);self.size=size;self.cancel_event=cancel_event;self.proc=None
+        self.decoded=decode_model(self.model_path)
+        token=hashlib.sha256(f"{self.model_path.resolve()}|{worker_id}|{time.time_ns()}".encode()).hexdigest()[:12]
+        self.obj=WORK_DIR/f"persistent_{token}.obj";self.script=WORK_DIR/f"persistent_{token}.py"
+        WORK_DIR.mkdir(parents=True,exist_ok=True);VARIANT_CACHE_DIR.mkdir(parents=True,exist_ok=True)
+        export_obj(self.decoded,self.obj,seed_texture_paths,include_collision=False)
+        body_mat=next((m for m in self.decoded.materials if (m.map_mask&1) and not (m.map_mask&6)),None)
+        if body_mat is None and self.decoded.materials: body_mat=self.decoded.materials[0]
+        window_mat=next((m for m in self.decoded.materials if (m.map_mask&3)==3),None)
+        if window_mat is None and len(self.decoded.materials)>=2: window_mat=self.decoded.materials[1]
+        safe=lambda m: re.sub(r"[^A-Za-z0-9_.-]+","_",m.name or "").strip("_") if m else ""
+        base=_script(self.obj,VARIANT_CACHE_DIR/f"_persistent_probe_{token}.png",size).read_text(encoding="utf-8")
+        base=base.rsplit('bpy.ops.render.render(write_still=True)',1)[0]
+        loop=f'''
+import sys,json,traceback
+BODY_MATERIAL={safe(body_mat)!r}
+WINDOW_MATERIAL={safe(window_mat)!r}
+def find_mat(name):
+    for m in bpy.data.materials:
+        if m and m.use_nodes and name and (m.name==name or m.name.startswith(name+".")): return m
+    return None
+body_mat=find_mat(BODY_MATERIAL); window_mat=find_mat(WINDOW_MATERIAL)
+def image_node_for_base(mat):
+    if not mat:return None,None
+    nodes=mat.node_tree.nodes;bsdf=nodes.get("Principled BSDF")
+    if not bsdf:return None,None
+    node=None
+    if bsdf.inputs["Base Color"].is_linked:
+        n=bsdf.inputs["Base Color"].links[0].from_node
+        if n and n.type=="TEX_IMAGE":node=n
+    if node is None:
+        node=next((n for n in nodes if n.type=="TEX_IMAGE"),None)
+    if node is None:node=nodes.new("ShaderNodeTexImage")
+    return node,bsdf
+body_node,body_bsdf=image_node_for_base(body_mat)
+window_color_node,window_bsdf=image_node_for_base(window_mat)
+window_alpha_node=None
+if window_mat and window_bsdf:
+    nodes=window_mat.node_tree.nodes;links=window_mat.node_tree.links
+    window_alpha_node=next((n for n in nodes if n.type=="TEX_IMAGE" and n.label=="There Window Opacity"),None)
+    if window_alpha_node is None:
+        window_alpha_node=nodes.new("ShaderNodeTexImage");window_alpha_node.label="There Window Opacity"
+    window_alpha_node.image.colorspace_settings.name="Non-Color" if window_alpha_node.image else "sRGB"
+    if window_color_node and window_color_node.inputs["Vector"].is_linked:
+        links.new(window_color_node.inputs["Vector"].links[0].from_socket,window_alpha_node.inputs["Vector"])
+    links.new(window_alpha_node.outputs["Color"],window_bsdf.inputs["Alpha"])
+    window_bsdf.inputs["Roughness"].default_value=0.22
+    window_mat.surface_render_method="DITHERED"
+print("THERE_READY",flush=True)
+for line in sys.stdin:
+    try:
+        job=json.loads(line)
+        if job.get("cmd")=="quit":break
+        body=bpy.data.images.load(job["body"],check_existing=True);body_node.image=body
+        if window_color_node and job.get("window_color"):
+            window_color_node.image=bpy.data.images.load(job["window_color"],check_existing=True)
+        if window_alpha_node and job.get("window_alpha"):
+            ai=bpy.data.images.load(job["window_alpha"],check_existing=True);ai.colorspace_settings.name="Non-Color";window_alpha_node.image=ai
+        scene.render.filepath=job["output"];Path(job["output"]).parent.mkdir(parents=True,exist_ok=True)
+        bpy.ops.render.render(write_still=True)
+        print("THERE_RESULT|"+str(job["pid"])+"|OK|"+job["output"],flush=True)
+    except Exception as e:
+        print("THERE_RESULT|"+str(job.get("pid","?"))+"|FAIL|"+str(e).replace("|","/"),flush=True)
+'''
+        self.script.write_text(base+loop,encoding="utf-8")
+        blender=find_blender()
+        if not blender: raise RuntimeError("Blender not detected")
+        self.proc=subprocess.Popen([blender,"--background","--factory-startup","--python",str(self.script)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1)
+        deadline=time.monotonic()+180
+        while time.monotonic()<deadline:
+            if self.cancel_event is not None and self.cancel_event.is_set(): self.close(force=True);raise RuntimeError("Cancelled")
+            line=self.proc.stdout.readline()
+            if not line and self.proc.poll() is not None: raise RuntimeError("Persistent Blender worker exited during startup")
+            if "THERE_READY" in line:return
+        self.close(force=True);raise RuntimeError("Persistent Blender worker startup timed out")
+    def render(self,pid,texture_paths,force=False):
+        import re
+        out=variant_thumbnail_path(self.model_path,texture_paths,self.size)
+        if out.exists() and not force:return {"success":True,"cached":True,"output":str(out)}
+        if self.cancel_event is not None and self.cancel_event.is_set():return {"success":False,"cancelled":True}
+        slots={}
+        for tp in texture_paths:
+            m=re.match(r"^\d+_([1-9]\d*)\.",Path(tp).name,re.I)
+            if m:slots[int(m.group(1))]=str(Path(tp).resolve())
+        wc,wa=(3,4) if 4 in slots else ((2,3) if 2 in slots and 3 in slots else (None,None))
+        if 1 not in slots:return {"success":False,"message":"Variant has no _1 body texture","output":str(out)}
+        decoded_dir=WORK_DIR/"decoded_textures"
+        job={"pid":str(pid),"body":str(blender_texture_path(slots[1],decoded_dir).resolve()),"window_color":str(blender_texture_path(slots[wc],decoded_dir).resolve()) if wc else None,"window_alpha":str(blender_texture_path(slots[wa],decoded_dir).resolve()) if wa else None,"output":str(out.resolve())}
+        try:
+            self.proc.stdin.write(json.dumps(job)+"\n");self.proc.stdin.flush()
+            while True:
+                if self.cancel_event is not None and self.cancel_event.is_set():self.close(force=True);return {"success":False,"cancelled":True,"output":str(out)}
+                line=self.proc.stdout.readline()
+                if not line and self.proc.poll() is not None:return {"success":False,"message":"Persistent Blender worker exited","returncode":self.proc.returncode,"output":str(out)}
+                if line.startswith("THERE_RESULT|"):
+                    parts=line.rstrip().split("|",3)
+                    ok=len(parts)>2 and parts[2]=="OK" and out.exists()
+                    return {"success":ok,"cached":False,"output":str(out),"returncode":0 if ok else 1,"message":None if ok else (parts[3] if len(parts)>3 else "Render failed"),"log":line.rstrip()}
+        except Exception as e:return {"success":False,"message":str(e),"output":str(out)}
+    def close(self,force=False):
+        if not self.proc:return
+        try:
+            if self.proc.poll() is None and not force and self.proc.stdin:
+                self.proc.stdin.write('{"cmd":"quit"}\n');self.proc.stdin.flush();self.proc.wait(timeout=5)
+        except Exception:pass
+        if self.proc.poll() is None:
+            self.proc.terminate()
+            try:self.proc.wait(timeout=3)
+            except Exception:self.proc.kill()
+        self.proc=None
+
 def log_thumbnail_failure(model_path,message,returncode=None):
     FAILURE_LOG.parent.mkdir(parents=True,exist_ok=True)
     record={"time":time.time(),"model":str(model_path),"returncode":returncode,"message":str(message)[-4000:]}
