@@ -3,7 +3,7 @@ import hashlib, struct
 from pathlib import Path
 from typing import Any
 from utils import file_hashes
-from there_texture_decoder import open_texture_image
+from there_texture_decoder import open_texture_image, is_dxa5
 
 try:
     from PIL import Image, ImageFilter, ImageStat
@@ -111,7 +111,9 @@ def analyze_texture(path: Path) -> dict[str, Any]:
             result["histogram_hash"] = color_histogram_signature(img)
             small = rgba.resize((64, 64))
             alpha_pixels = [px[3] for px in small.getdata()]
-            result["alpha_coverage"] = sum(1 for x in alpha_pixels if x < 250) / max(len(alpha_pixels), 1)
+            if is_dxa5(path):
+                mask=list(img.convert("L").resize((64,64)).getdata());result["avg_a"]=sum(mask)/max(len(mask),1);result["alpha_coverage"]=sum(1 for x in mask if x<250)/max(len(mask),1)
+            else: result["alpha_coverage"] = sum(1 for x in alpha_pixels if x < 250) / max(len(alpha_pixels), 1)
             hsv = img.convert("HSV").resize((64, 64))
             hsv_data = list(hsv.getdata())
             result["brightness"] = sum(px[2] for px in hsv_data) / (255 * max(len(hsv_data), 1))
