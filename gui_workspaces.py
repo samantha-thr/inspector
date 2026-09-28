@@ -303,7 +303,7 @@ class VariantRenderTask(QThread):
         super().__init__();self.model=model;self.sets=sets;self.workers=max(1,workers);self.cancelled=False;self.cancel_event=threading.Event()
     def cancel(self): self.cancelled=True;self.cancel_event.set()
     def run(self):
-        ok=failed=cached=0;completed=0;total=len(self.sets);started=time.monotonic()
+        ok=failed=cached=0;completed=0;total=len(self.sets);started=time.monotonic();failures=[]
         def one(item):
             pid,paths=item
             if self.cancel_event.is_set(): return pid,{"success":False,"cancelled":True}
@@ -330,7 +330,9 @@ class VariantRenderTask(QThread):
                     completed+=1
                     if r.get("cached"): cached+=1
                     elif r.get("success"): ok+=1
-                    else: failed+=1
+                    else:
+                        failed+=1
+                        failures.append({"pid":pid,"paths":list(dict(futures.get(future,("",[])))[1]) if False else [],"returncode":r.get("returncode"),"message":r.get("message") or "Blender render failed","log":r.get("log",""),"output":r.get("output","")})
                     elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
                     self.progress.emit(completed,total,pid,rate,remaining)
                     if not self.cancel_event.is_set():
@@ -341,7 +343,7 @@ class VariantRenderTask(QThread):
                 for future in futures: future.cancel()
         finally:
             pool.shutdown(wait=True,cancel_futures=True)
-        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"cancelled":self.cancelled,"completed":completed})
+        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"cancelled":self.cancelled,"completed":completed,"failures":failures})
 
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
@@ -351,7 +353,8 @@ class VehicleVariantsPage(QWidget):
         self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing);self.render_button=render
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
-        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Workers"),self.workers,render,self.cancel_button,self.delete_all_button):r.addWidget(w)
+        self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
+        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Workers"),self.workers,render,self.cancel_button,self.failures_button,self.delete_all_button):r.addWidget(w)
         b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.load_folder()
     @staticmethod
@@ -439,8 +442,30 @@ class VehicleVariantsPage(QWidget):
         self.progress.setRange(0,len(missing));self.progress.setValue(0);self.progress.setFormat("%v / %m • %p%");self.render_button.setEnabled(False);self.cancel_button.setEnabled(True);worker_count=int(self.workers.currentText());self.status.setText(f"Starting render • {len(missing):,} missing variants • {worker_count} worker(s)…");self.task=VariantRenderTask(self.model,missing,worker_count);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,pid,rate,remaining):
         self.progress.setValue(i);self.status.setText(f"Rendering {i:,} / {total:,} • PID {pid} • {rate:.2f}/sec • ETA {ThumbnailBatchTask._fmt(remaining)}")
+    def show_failures(self):
+        if not self.last_failures:return
+        d=QDialog(self);d.setWindowTitle(f"Vehicle Variant Failures ({len(self.last_failures)})");d.resize(1000,650);v=QVBoxLayout(d)
+        table=QTableWidget(len(self.last_failures),3);table.setHorizontalHeaderLabels(["PID","Return code","Reason"]);table.horizontalHeader().setStretchLastSection(True);table.setSelectionBehavior(QAbstractItemView.SelectRows);table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        detail=QPlainTextEdit();detail.setReadOnly(True);detail.setMinimumHeight(220)
+        for row,item in enumerate(self.last_failures):
+            table.setItem(row,0,QTableWidgetItem(str(item.get("pid",""))));table.setItem(row,1,QTableWidgetItem(str(item.get("returncode",""))));table.setItem(row,2,QTableWidgetItem(str(item.get("message","Render failed"))))
+        def selected():
+            row=table.currentRow()
+            if row<0:return
+            x=self.last_failures[row];detail.setPlainText(f"PID: {x.get('pid')}\nReturn code: {x.get('returncode')}\nOutput: {x.get('output','')}\n\n{x.get('log','')}")
+        table.itemSelectionChanged.connect(selected);v.addWidget(table,1);v.addWidget(QLabel("Blender / renderer details"));v.addWidget(detail)
+        export=QPushButton("Export Failure Report");export.clicked.connect(lambda:self.export_failures(d));v.addWidget(export)
+        if self.last_failures:table.selectRow(0)
+        d.exec()
+    def export_failures(self,parent=None):
+        if not self.last_failures:return
+        path,_=QFileDialog.getSaveFileName(parent or self,"Export Failure Report","vehicle_variant_failures.json","JSON (*.json)")
+        if not path:return
+        Path(path).write_text(json.dumps({"model":self.model.get("filename") if self.model else None,"folder":self.folder.text().strip(),"created":time.strftime("%Y-%m-%d %H:%M:%S"),"failures":self.last_failures},indent=2),encoding="utf-8")
+        self.status.setText(f"Exported {len(self.last_failures):,} failures to {path}")
+
     def finished(self,result):
-        self.render_button.setEnabled(True);self.cancel_button.setEnabled(False);self.task=None;self.refresh()
+        self.render_button.setEnabled(True);self.cancel_button.setEnabled(False);self.task=None;self.last_failures=result.get("failures",[]);self.failures_button.setEnabled(bool(self.last_failures));self.refresh()
         if result.get("cancelled"):
             self.status.setText(f"Stopped • completed {result['completed']:,} • rendered {result['rendered']:,} • failed {result['failed']:,}")
         else:
