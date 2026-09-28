@@ -325,8 +325,8 @@ class VehicleVariantsPage(QWidget):
         h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
         r=QHBoxLayout();self.folder=QLineEdit("bg");self.model_box=QComboBox();load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
         self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing);self.render_button=render
-        self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
-        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Workers"),self.workers,render,self.cancel_button):r.addWidget(w)
+        self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)\n        self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
+        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Workers"),self.workers,render,self.cancel_button,self.delete_all_button):r.addWidget(w)
         b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.load_folder()
     @staticmethod
@@ -374,6 +374,21 @@ class VehicleVariantsPage(QWidget):
     def delete_variant(self,paths):
         if not self.model:return
         remove_cached_variant(self.model["path"],paths);self.refresh()
+
+    def delete_all_variants(self):
+        if not self.model:return
+        if self.task and self.task.isRunning():
+            QMessageBox.warning(self,APP_NAME,"Stop the current render batch before deleting cached renders.");return
+        cached=[paths for _,paths in self.sets if cached_variant_thumbnail(self.model["path"],paths)]
+        if not cached:
+            self.status.setText("No cached variant renders to delete for this model.");return
+        name=self.model.get("filename",Path(self.model["path"]).name)
+        msg=f"Delete all {len(cached):,} cached vehicle variant renders for {name}?\\n\\nOnly generated preview PNGs will be removed. Source models, DDS textures, and database records will NOT be changed."
+        box=QMessageBox(QMessageBox.Warning,"Delete All Variant Renders",msg,QMessageBox.Cancel,self)
+        delete=box.addButton("Delete All Renders",QMessageBox.DestructiveRole);box.setDefaultButton(QMessageBox.Cancel);box.exec()
+        if box.clickedButton()!=delete:return
+        removed=sum(1 for paths in cached if remove_cached_variant(self.model["path"],paths))
+        self.refresh();self.status.setText(f"Deleted {removed:,} cached variant renders for {name}.")
 
     def cancel_render(self):
         if self.task and self.task.isRunning():
