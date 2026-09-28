@@ -327,7 +327,7 @@ class VehicleVariantsPage(QWidget):
     @staticmethod
     def product_id(name):
         import re
-        m=re.match(r"^(\\d+)_([1-9]\\d*)\\.",name)
+        m=re.match(r"^(\d+)_([1-9]\d*)\.",str(name),re.IGNORECASE)
         return (m.group(1),int(m.group(2))) if m else None
     def load_folder(self):
         folder=self.folder.text().strip();previous=self.model_box.currentText()
