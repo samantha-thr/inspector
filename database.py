@@ -360,7 +360,10 @@ class Database:
         FROM model_texture_links l JOIN textures t ON t.path=l.texture_path WHERE model_path=? ORDER BY score DESC LIMIT ?""", (model_path, limit)).fetchall()
 
     def textures_in_folder(self, folder, limit=100000):
-        return self.db.execute("""SELECT * FROM textures WHERE folder=? AND filename GLOB '[0-9]*_[1-9]*.*' ORDER BY filename LIMIT ?""",(folder,limit)).fetchall()
+        return self.db.execute("""SELECT * FROM textures
+            WHERE lower(replace(folder,'/','\\'))=lower(replace(?,'/','\\'))
+              AND filename GLOB '[0-9]*_*'
+            ORDER BY filename LIMIT ?""",(folder,limit)).fetchall()
 
     def models_in_folder(self, folder, limit=10000):
         return self.db.execute("""SELECT * FROM models WHERE folder=? ORDER BY filename LIMIT ?""",(folder,limit)).fetchall()
