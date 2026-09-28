@@ -629,11 +629,25 @@ def _resolve_material_textures(
     assignments: dict[int, Path | None] = {m.index: None for m in model.materials}
 
     if linked:
-        # Deterministic filename order maps _1, _2, _3... across materials.
-        linked = sorted(linked, key=lambda p: p.name.lower())
-        for material in model.materials:
-            if material.index < len(linked):
-                assignments[material.index] = linked[material.index]
+        # Preserve There product texture slot numbers.  A set such as
+        # _1/_3/_4 must map to material slots 0/2/3; never collapse it to
+        # three sequential materials merely because _2 is absent.
+        import re
+        slotted = {}
+        unslotted = []
+        for p in linked:
+            match = re.match(r"^\\d+_([1-9]\\d*)\\.", p.name, re.IGNORECASE)
+            if match:
+                slotted[int(match.group(1)) - 1] = p
+            else:
+                unslotted.append(p)
+        if slotted:
+            for material in model.materials:
+                if material.index in slotted:
+                    assignments[material.index] = slotted[material.index]
+        else:
+            for material,p in zip(model.materials,sorted(unslotted,key=lambda x:x.name.lower())):
+                assignments[material.index] = p
 
     resource_root = None
     parts = list(model_path.resolve().parts)
