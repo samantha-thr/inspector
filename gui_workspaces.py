@@ -317,7 +317,7 @@ class VariantRenderTask(QThread):
 
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
-        super().__init__();self.db=db;self.task=None;self.sets=[];self.model=None;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        super().__init__();self.db=db;self.task=None;self.sets=[];self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
         r=QHBoxLayout();self.folder=QLineEdit("bg");self.model_box=QComboBox();load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
         self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing)
@@ -334,8 +334,8 @@ class VehicleVariantsPage(QWidget):
         for m in models:self.model_box.addItem(m["filename"],dict(m))
         self.model_box.blockSignals(False);self.discover();self.refresh()
     def discover(self):
-        groups={}
-        for t in self.db.textures_in_folder(self.folder.text().strip(),100000):
+        groups={};textures=self.db.textures_in_folder(self.folder.text().strip(),100000);self.raw_texture_count=len(textures)
+        for t in textures:
             parsed=self.product_id(t["filename"])
             if not parsed:continue
             pid,slot=parsed;groups.setdefault(pid,{})[slot]=t["path"]
