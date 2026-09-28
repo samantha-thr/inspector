@@ -10,6 +10,7 @@ WORK_DIR=PROJECT_DIR/"cache"/"thumbnail_work"
 FAILURE_LOG=PROJECT_DIR/"cache"/"thumbnail_failures.jsonl"
 METADATA_DIR=PROJECT_DIR/"cache"/"model_thumbnail_meta"
 RENDER_VERSION=2
+VARIANT_CACHE_DIR=PROJECT_DIR/"cache"/"model_variants"
 
 def thumbnail_key(model_path):
     p=Path(model_path)
@@ -18,6 +19,21 @@ def thumbnail_key(model_path):
 
 def thumbnail_path(model_path,size=512):
     return CACHE_DIR/f"{thumbnail_key(model_path)}_{size}.png"
+
+def variant_key(model_path,texture_paths,size=512):
+    p=Path(model_path);parts=[str(p.resolve()),str(p.stat().st_mtime_ns),str(size)]
+    for t in sorted(map(str,texture_paths or [])):
+        tp=Path(t)
+        try:parts.extend([str(tp.resolve()),str(tp.stat().st_mtime_ns)])
+        except Exception:parts.append(t)
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:28]
+
+def variant_thumbnail_path(model_path,texture_paths,size=512):
+    return VARIANT_CACHE_DIR/f"{variant_key(model_path,texture_paths,size)}_{size}.png"
+
+def cached_variant_thumbnail(model_path,texture_paths,size=512):
+    p=variant_thumbnail_path(model_path,texture_paths,size)
+    return p if p.exists() else None
 
 def cached_thumbnail(model_path,size=512):
     p=thumbnail_path(model_path,size)
@@ -107,6 +123,20 @@ def render_model_thumbnail(model_path,linked_textures=None,size=512,force=False)
     if success:
         write_render_metadata(model_path,out,size);clear_thumbnail_failure(model_path)
     else:log_thumbnail_failure(model_path,log[-4000:] or "Render failed",proc.returncode)
+    return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:]}
+
+def render_model_variant(model_path,texture_paths,size=512,force=False):
+    model_path=Path(model_path);texture_paths=[str(x) for x in texture_paths if x]
+    VARIANT_CACHE_DIR.mkdir(parents=True,exist_ok=True);WORK_DIR.mkdir(parents=True,exist_ok=True)
+    out=variant_thumbnail_path(model_path,texture_paths,size)
+    if out.exists() and not force:return {"success":True,"cached":True,"output":str(out)}
+    blender=find_blender()
+    if not blender:return {"success":False,"message":"Blender not detected"}
+    decoded=decode_model(model_path);key=variant_key(model_path,texture_paths,size);obj=WORK_DIR/f"variant_{key}.obj"
+    export_obj(decoded,obj,texture_paths,include_collision=False);script=_script(obj,out,size)
+    proc=subprocess.run([blender,"--background","--factory-startup","--python",str(script)],capture_output=True,text=True,timeout=180)
+    log=(proc.stdout or "")+"\
+"+(proc.stderr or "");success=proc.returncode==0 and out.exists()
     return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:]}
 
 def log_thumbnail_failure(model_path,message,returncode=None):
