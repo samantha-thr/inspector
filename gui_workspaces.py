@@ -184,14 +184,17 @@ class ThumbnailStudio(QWidget):
     def __init__(self,db):
         super().__init__();self.db=db;self.task=None;self.cards=[];self.gallery_page=0;self.gallery_page_size=250;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Visual Library");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Build, browse and manage cached LOD0 renders for the indexed model library."))
-        r=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Optional filename/folder/path filter");self.search.returnPressed.connect(self.refresh)
+        filters=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Optional filename/folder/path filter");self.search.returnPressed.connect(self.refresh)
         self.count=QComboBox();self.count.addItems(["25","50","100","250","500","1000","All"]);self.count.setCurrentText("100")
         self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.engine=QComboBox();self.engine.addItems(["Persistent (fast)","One-shot (safe)"]);self.workers.setToolTip("Parallel Blender render processes. 2 is a safe default; 3–4 may be faster on high-core systems.")
         self.view=QComboBox();self.view.addItems(["Cached only","All models","Missing renders","Failed renders"])
-        go=QPushButton("Render Missing");go.clicked.connect(self.start);refresh=QPushButton("Refresh Gallery");refresh.clicked.connect(self.refresh)
-        for w in (self.search,QLabel("Batch"),self.count,QLabel("Workers"),self.workers,QLabel("View"),self.view,go,refresh):r.addWidget(w)
+        for w in (self.search,QLabel("Batch"),self.count,QLabel("View"),self.view):filters.addWidget(w)
+        filters.setStretch(0,1);b.addLayout(filters)
+        actions=QHBoxLayout();go=QPushButton("Render Missing");go.clicked.connect(self.start);refresh=QPushButton("Refresh Gallery");refresh.clicked.connect(self.refresh)
+        for w in (QLabel("Workers"),self.workers,go,refresh):actions.addWidget(w)
+        actions.addStretch();b.addLayout(actions)
         self.view.currentIndexChanged.connect(self.reset_gallery);self.count.currentIndexChanged.connect(self.reset_gallery);self.search.textChanged.connect(self.reset_gallery)
-        b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
+self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1)
         nav=QHBoxLayout();self.gallery_prev=QPushButton("Previous 250");self.gallery_next=QPushButton("Next 250");self.gallery_page_label=QLabel()
         self.gallery_prev.clicked.connect(self.prev_gallery);self.gallery_next.clicked.connect(self.next_gallery)
@@ -375,14 +378,18 @@ class VehicleVariantsPage(QWidget):
     def __init__(self,db):
         super().__init__();self.db=db;self.task=None;self.sets=[];self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
-        r=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(170);self.folder.setToolTip("Indexed asset folder");self.model_box=QComboBox();load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
+        # Two-row responsive toolbar: selection on top, render actions below.
+        select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(210);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder");self.model_box=QComboBox();self.model_box.setMinimumWidth(180);self.model_box.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
         self.populate_folders()
-        self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.engine=QComboBox();self.engine.addItems(["Persistent (fast)","One-shot (safe)"]);render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing);self.render_button=render
+        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box):select_row.addWidget(w)
+        select_row.setStretch(1,2);select_row.setStretch(4,2);b.addLayout(select_row)
+        action_row=QHBoxLayout();self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.engine=QComboBox();self.engine.addItems(["Persistent (fast)","One-shot (safe)"]);self.engine.setMinimumWidth(140);render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing);self.render_button=render
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
-        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,render,self.cancel_button,self.failures_button,self.delete_all_button):r.addWidget(w)
-        b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
+        for w in (QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,render,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
+        action_row.addStretch();b.addLayout(action_row)
+        self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.load_folder()
     def folder_name(self):
         return (self.folder.currentData() or self.folder.currentText()).strip()
