@@ -164,29 +164,33 @@ def render_model_variant(model_path,texture_paths,size=512,force=False):
         alpha_ready=str(blender_texture_path(slots[4],WORK_DIR/"decoded_textures").resolve())
         window_mat=next((m for m in decoded.materials if (m.map_mask & 0x03)==0x03),None)
         window_name=re.sub(r"[^A-Za-z0-9_.-]+","_",window_mat.name or "").strip("_") if window_mat else ""
-        setup=f"WINDOW_MATERIAL={window_name!r}\
-WINDOW_COLOR={color_ready!r}\
-WINDOW_ALPHA={alpha_ready!r}\
-"
+        setup=f"WINDOW_MATERIAL={window_name!r}\nWINDOW_COLOR={color_ready!r}\nWINDOW_ALPHA={alpha_ready!r}\n"
         block='''# Explicit There buggy window shader.
 try:
     color_img=bpy.data.images.load(WINDOW_COLOR,check_existing=True)
     alpha_img=bpy.data.images.load(WINDOW_ALPHA,check_existing=True)
-    # Find the material currently carrying the _3 colour image.
+    # Target the actual There material carrying COLOR + OPACITY semantics.
     target=None
     for mat in bpy.data.materials:
         if not mat or not mat.use_nodes: continue
-        for node in mat.node_tree.nodes:
-            if node.type=="TEX_IMAGE" and node.image and Path(node.image.filepath).name.lower()==Path(WINDOW_COLOR).name.lower():
-                target=mat; break
-        if target: break
+        if WINDOW_MATERIAL and (mat.name==WINDOW_MATERIAL or mat.name.startswith(WINDOW_MATERIAL+".")):
+            target=mat; break
+    if target: break
     if target:
         nodes=target.node_tree.nodes; links=target.node_tree.links; bsdf=nodes.get("Principled BSDF")
         if bsdf:
-            color_node=next((n for n in nodes if n.type=="TEX_IMAGE" and n.image and Path(n.image.filepath).name.lower()==Path(WINDOW_COLOR).name.lower()),None)
+            color_node=next((n for n in nodes if n.type=="TEX_IMAGE" and n.image),None)
             alpha_node=nodes.new("ShaderNodeTexImage"); alpha_node.image=alpha_img; alpha_node.label="There _4 Window Opacity"; alpha_node.image.colorspace_settings.name="Non-Color"
-            if color_node: links.new(color_node.outputs["Color"],bsdf.inputs["Base Color"])
+            if color_node:
+                color_node.image=color_img
+                color_node.label="There _3 Window Color"
+            else:
+                color_node=nodes.new("ShaderNodeTexImage"); color_node.image=color_img; color_node.label="There _3 Window Color"
+            links.new(color_node.outputs["Color"],bsdf.inputs["Base Color"])
+            if color_node.inputs["Vector"].is_linked:
+                src=color_node.inputs["Vector"].links[0].from_socket; links.new(src,alpha_node.inputs["Vector"])
             links.new(alpha_node.outputs["Color"],bsdf.inputs["Alpha"])
+            bsdf.inputs["Roughness"].default_value=0.22
             target.surface_render_method="DITHERED"
 except Exception as e:
     print("There window shader warning:",e)
