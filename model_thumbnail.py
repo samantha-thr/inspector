@@ -142,7 +142,7 @@ def render_model_thumbnail(model_path,linked_textures=None,size=512,force=False)
     else:log_thumbnail_failure(model_path,log[-4000:] or "Render failed",proc.returncode)
     return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:]}
 
-def render_model_variant(model_path,texture_paths,size=512,force=False):
+def render_model_variant(model_path,texture_paths,size=512,force=False,cancel_event=None):
     model_path=Path(model_path);texture_paths=[str(x) for x in texture_paths if x]
     VARIANT_CACHE_DIR.mkdir(parents=True,exist_ok=True);WORK_DIR.mkdir(parents=True,exist_ok=True)
     out=variant_thumbnail_path(model_path,texture_paths,size)
@@ -202,9 +202,20 @@ except Exception as e:
         marker="# Preserve alpha from texture-driven materials (notably buggy window layers)."
         txt=setup+txt.replace(marker,block+"\n"+marker)
         script.write_text(txt,encoding="utf-8")
-    proc=subprocess.run([blender,"--background","--factory-startup","--python",str(script)],capture_output=True,text=True,timeout=180)
-    log=(proc.stdout or "")+"\
-"+(proc.stderr or "");success=proc.returncode==0 and out.exists()
+    proc=subprocess.Popen([blender,"--background","--factory-startup","--python",str(script)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    started=time.monotonic()
+    while proc.poll() is None:
+        if cancel_event is not None and cancel_event.is_set():
+            proc.terminate()
+            try: proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill();proc.wait()
+            return {"success":False,"cancelled":True,"cached":False,"output":str(out),"returncode":proc.returncode,"log":"Cancelled by user"}
+        if time.monotonic()-started>180:
+            proc.kill();proc.wait();raise subprocess.TimeoutExpired(proc.args,180)
+        time.sleep(.10)
+    stdout,stderr=proc.communicate()
+    log=(stdout or "")+"\n"+(stderr or "");success=proc.returncode==0 and out.exists()
     return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:]}
 
 def log_thumbnail_failure(model_path,message,returncode=None):
