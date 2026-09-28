@@ -11,7 +11,7 @@ WORK_DIR=PROJECT_DIR/"cache"/"thumbnail_work"
 FAILURE_LOG=PROJECT_DIR/"cache"/"thumbnail_failures.jsonl"
 METADATA_DIR=PROJECT_DIR/"cache"/"model_thumbnail_meta"
 RENDER_VERSION=2
-VARIANT_RENDER_VERSION=5
+VARIANT_RENDER_VERSION=6
 VARIANT_CACHE_DIR=PROJECT_DIR/"cache"/"model_variants"
 
 def thumbnail_key(model_path):
@@ -162,7 +162,12 @@ def render_model_variant(model_path,texture_paths,size=512,force=False):
         txt=script.read_text(encoding="utf-8")
         color_ready=str(blender_texture_path(slots[3],WORK_DIR/"decoded_textures").resolve())
         alpha_ready=str(blender_texture_path(slots[4],WORK_DIR/"decoded_textures").resolve())
-        setup=f"WINDOW_SOURCE={slots[3]!r}\nWINDOW_COLOR={color_ready!r}\nWINDOW_ALPHA={alpha_ready!r}\n"
+        window_mat=next((m for m in decoded.materials if (m.map_mask & 0x03)==0x03),None)
+        window_name=re.sub(r"[^A-Za-z0-9_.-]+","_",window_mat.name or "").strip("_") if window_mat else ""
+        setup=f"WINDOW_MATERIAL={window_name!r}\
+WINDOW_COLOR={color_ready!r}\
+WINDOW_ALPHA={alpha_ready!r}\
+"
         block='''# Explicit There buggy window shader.
 try:
     color_img=bpy.data.images.load(WINDOW_COLOR,check_existing=True)
