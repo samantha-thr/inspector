@@ -361,8 +361,7 @@ class Database:
 
     def textures_in_folder(self, folder, limit=100000):
         return self.db.execute("""SELECT * FROM textures
-            WHERE lower(replace(folder,'/','\\'))=lower(replace(?,'/','\\'))
-              AND filename GLOB '[0-9]*_*'
+            WHERE lower(trim(replace(folder,'/','\\'),'\\'))=lower(trim(replace(?,'/','\\'),'\\'))
             ORDER BY filename LIMIT ?""",(folder,limit)).fetchall()
 
     def models_in_folder(self, folder, limit=10000):
