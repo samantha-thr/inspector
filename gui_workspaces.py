@@ -376,7 +376,7 @@ class VehicleVariantsPage(QWidget):
         super().__init__();self.db=db;self.task=None;self.sets=[];self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
         r=QHBoxLayout();self.folder=QLineEdit("bg");self.model_box=QComboBox();load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
-        self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing);self.render_button=render
+        self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.engine=QComboBox();self.engine.addItems(["Persistent (fast)","One-shot (safe)"]);render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing);self.render_button=render
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
