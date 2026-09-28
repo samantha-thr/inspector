@@ -4,12 +4,14 @@ from pathlib import Path
 from config import PROJECT_DIR
 from model_converter import find_blender
 from there_model_decoder import decode_model, export_obj
+from there_texture_decoder import decoded_texture_path
 
 CACHE_DIR=PROJECT_DIR/"cache"/"model_thumbnails"
 WORK_DIR=PROJECT_DIR/"cache"/"thumbnail_work"
 FAILURE_LOG=PROJECT_DIR/"cache"/"thumbnail_failures.jsonl"
 METADATA_DIR=PROJECT_DIR/"cache"/"model_thumbnail_meta"
 RENDER_VERSION=2
+VARIANT_RENDER_VERSION=3
 VARIANT_CACHE_DIR=PROJECT_DIR/"cache"/"model_variants"
 
 def thumbnail_key(model_path):
@@ -21,7 +23,7 @@ def thumbnail_path(model_path,size=512):
     return CACHE_DIR/f"{thumbnail_key(model_path)}_{size}.png"
 
 def variant_key(model_path,texture_paths,size=512):
-    p=Path(model_path);parts=[str(p.resolve()),str(p.stat().st_mtime_ns),str(size)]
+    p=Path(model_path);parts=[str(p.resolve()),str(p.stat().st_mtime_ns),str(size),f"variant-v{VARIANT_RENDER_VERSION}"]
     for t in sorted(map(str,texture_paths or [])):
         tp=Path(t)
         try:parts.extend([str(tp.resolve()),str(tp.stat().st_mtime_ns)])
@@ -158,7 +160,8 @@ def render_model_variant(model_path,texture_paths,size=512,force=False):
         if m:slots[int(m.group(1))]=str(Path(tp).resolve())
     if 3 in slots and 4 in slots:
         txt=script.read_text(encoding="utf-8")
-        setup=f"WINDOW_COLOR={slots[3]!r}\nWINDOW_ALPHA={slots[4]!r}\n"
+        alpha_ready=str(decoded_texture_path(slots[4],WORK_DIR/"decoded_textures").resolve())
+        setup=f"WINDOW_COLOR={slots[3]!r}\nWINDOW_ALPHA={alpha_ready!r}\n"
         block='''# Explicit There buggy window shader.
 try:
     color_img=bpy.data.images.load(WINDOW_COLOR,check_existing=True)
