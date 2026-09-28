@@ -158,7 +158,7 @@ def render_model_variant(model_path,texture_paths,size=512,force=False):
         if m:slots[int(m.group(1))]=str(Path(tp).resolve())
     if 3 in slots and 4 in slots:
         txt=script.read_text(encoding="utf-8")
-        setup=f"WINDOW_COLOR={slots[3]!r}\\nWINDOW_ALPHA={slots[4]!r}\\n"
+        setup=f"WINDOW_COLOR={slots[3]!r}\nWINDOW_ALPHA={slots[4]!r}\n"
         block='''# Explicit There buggy window shader.
 try:
     color_img=bpy.data.images.load(WINDOW_COLOR,check_existing=True)
@@ -183,7 +183,7 @@ except Exception as e:
     print("There window shader warning:",e)
 '''
         marker="# Preserve alpha from texture-driven materials (notably buggy window layers)."
-        txt=setup+txt.replace(marker,block+"\\n"+marker)
+        txt=setup+txt.replace(marker,block+"\n"+marker)
         script.write_text(txt,encoding="utf-8")
     proc=subprocess.run([blender,"--background","--factory-startup","--python",str(script)],capture_output=True,text=True,timeout=180)
     log=(proc.stdout or "")+"\
