@@ -266,7 +266,6 @@ if window_mat and window_bsdf:
     window_alpha_node=next((n for n in nodes if n.type=="TEX_IMAGE" and n.label=="There Window Opacity"),None)
     if window_alpha_node is None:
         window_alpha_node=nodes.new("ShaderNodeTexImage");window_alpha_node.label="There Window Opacity"
-    window_alpha_node.image.colorspace_settings.name="Non-Color" if window_alpha_node.image else "sRGB"
     if window_color_node and window_color_node.inputs["Vector"].is_linked:
         links.new(window_color_node.inputs["Vector"].links[0].from_socket,window_alpha_node.inputs["Vector"])
     links.new(window_alpha_node.outputs["Color"],window_bsdf.inputs["Alpha"])
