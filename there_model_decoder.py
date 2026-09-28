@@ -642,7 +642,7 @@ def _resolve_material_textures(
         product_slots = {}
         unslotted = []
         for p in linked:
-            match = re.match(r"^\\d+_([1-9]\\d*)\\.", p.name, re.IGNORECASE)
+            match = re.match(r"^\d+_([1-9]\d*)\.", p.name, re.IGNORECASE)
             if match: product_slots[int(match.group(1))] = p
             else: unslotted.append(p)
 
