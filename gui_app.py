@@ -272,21 +272,42 @@ class MainWindow(QMainWindow):
         side=QFrame(); side.setObjectName("sidebar"); side.setFixedWidth(230); sb=QVBoxLayout(side); sb.setContentsMargins(18,22,18,18)
         brand=QLabel("THERE" + chr(10) + "INSPECTOR"); brand.setObjectName("brand"); sb.addWidget(brand)
         sub=QLabel("Asset Intelligence Suite"); sub.setObjectName("muted"); sb.addWidget(sub); sb.addSpacing(20)
-        self.nav=QListWidget(); self.nav.setObjectName("nav")
-        names=["Dashboard","Models","Textures","Visual Library","Vehicle Variants","Evidence","Review Queue","Compare","Convert","Knowledge","Scan & Analysis","Diagnostics","Settings"]
-        self.nav.addItems(names); self.nav.setCurrentRow(0); sb.addWidget(self.nav,1)
+        self.nav=QTreeWidget(); self.nav.setObjectName("nav"); self.nav.setHeaderHidden(True); self.nav.setIndentation(14)
+        nav_groups=[
+            ("Home",[("Dashboard",0)]),
+            ("Assets",[("Models",1),("Textures",2),("Visual Library",3),("Vehicle Variants",4)]),
+            ("Forensics",[("Evidence",5),("Review Queue",6),("Compare",7)]),
+            ("Tools",[("Convert",8),("Knowledge",9),("Scan & Analysis",10)]),
+            ("System",[("Diagnostics",11),("Settings",12)]),
+        ]
+        self.nav_items={}
+        for group,items in nav_groups:
+            parent=QTreeWidgetItem([group]); parent.setFlags(parent.flags() & ~Qt.ItemIsSelectable); self.nav.addTopLevelItem(parent)
+            for label,index in items:
+                child=QTreeWidgetItem([label]); child.setData(0,Qt.UserRole,index); parent.addChild(child); self.nav_items[index]=child
+            parent.setExpanded(True)
+        sb.addWidget(self.nav,1)
         db_label=QLabel("Database" + chr(10) + str(DATABASE_PATH)); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
         sb.addWidget(db_label); shell.addWidget(side)
         self.stack=QStackedWidget()
         pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),ThumbnailStudio(self.db),VehicleVariantsPage(self.db),Evidence(self.db),ReviewQueue(self.db),
                ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),DiagnosticsPage(self.db),SettingsPage(self.db)]
         for p in pages:self.stack.addWidget(p)
-        shell.addWidget(self.stack,1); self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        shell.addWidget(self.stack,1)
+        self.nav.currentItemChanged.connect(self._nav_changed)
+        self.nav.setCurrentItem(self.nav_items[0])
         self.statusBar().showMessage(f"{self.db.count_models():,} models • {self.db.count_textures():,} textures • {DATABASE_PATH}")
         QShortcut(QKeySequence("F5"),self,activated=self.refresh_all)
-        QShortcut(QKeySequence("Ctrl+1"),self,activated=lambda:self.nav.setCurrentRow(0))
-        QShortcut(QKeySequence("Ctrl+2"),self,activated=lambda:self.nav.setCurrentRow(1))
-        QShortcut(QKeySequence("Ctrl+3"),self,activated=lambda:self.nav.setCurrentRow(2))
+        QShortcut(QKeySequence("Ctrl+1"),self,activated=lambda:self.select_page(0))
+        QShortcut(QKeySequence("Ctrl+2"),self,activated=lambda:self.select_page(1))
+        QShortcut(QKeySequence("Ctrl+3"),self,activated=lambda:self.select_page(2))
+    def _nav_changed(self,current,previous):
+        if current is None:return
+        index=current.data(0,Qt.UserRole)
+        if index is not None:self.stack.setCurrentIndex(int(index))
+    def select_page(self,index):
+        item=self.nav_items.get(index)
+        if item:self.nav.setCurrentItem(item)
     def refresh_all(self):
         for i in range(self.stack.count()):
             page = self.stack.widget(i)
@@ -303,9 +324,10 @@ QLabel#brand{{color:{CYAN};font-size:21pt;font-weight:800;letter-spacing:2px}}
 QLabel#title{{font-size:24pt;font-weight:700;color:white}}
 QLabel#muted{{color:{MUTED}}} QLabel#metric{{font-size:23pt;font-weight:700;color:white}}
 QFrame#card{{background:{PANEL};border:1px solid #2b3038;border-radius:10px}}
-QListWidget#nav{{background:transparent;border:0;outline:0}}
-QListWidget#nav::item{{padding:12px;margin:2px;border-radius:7px;color:#b8c0ca}}
-QListWidget#nav::item:selected{{background:#16383c;color:{CYAN};font-weight:700}}
+QTreeWidget#nav{{background:transparent;border:0;outline:0}}
+QTreeWidget#nav::item{{padding:7px 8px;margin:1px;border-radius:6px;color:#b8c0ca}}
+QTreeWidget#nav::item:selected{{background:#16383c;color:{CYAN};font-weight:700}}
+QTreeWidget#nav::branch{{background:transparent}}
 QLineEdit,QComboBox{{background:{PANEL};border:1px solid #343b45;border-radius:6px;padding:8px}}
 QPushButton{{background:#243038;color:{CYAN};border:1px solid #31515a;border-radius:6px;padding:8px 14px;font-weight:600}}
 QTableWidget{{background:{PANEL};border:1px solid #2b3038;gridline-color:#292e35}}
