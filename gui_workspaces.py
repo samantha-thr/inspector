@@ -380,10 +380,10 @@ class VehicleVariantsPage(QWidget):
         super().__init__();self.db=db;self.task=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
         # Two-row responsive toolbar: selection on top, render actions below.
-        select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(210);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder");self.model_box=QComboBox();self.model_box.setMinimumWidth(180);self.model_box.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
+        select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(210);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder");self.model_box=QComboBox();self.model_box.setMinimumWidth(180);self.model_box.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.template_box=QComboBox();self.template_box.setMinimumWidth(220);self.template_box.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.template_box.setToolTip("Reference template used to classify PID texture layouts");load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
         self.populate_folders()
-        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box):select_row.addWidget(w)
-        select_row.setStretch(1,2);select_row.setStretch(4,2);b.addLayout(select_row)
+        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Template"),self.template_box):select_row.addWidget(w)
+        select_row.setStretch(1,2);select_row.setStretch(4,2);select_row.setStretch(6,2);b.addLayout(select_row)
         action_row=QHBoxLayout();self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.engine=QComboBox();self.engine.addItems(["Persistent (fast)","One-shot (safe)"]);self.engine.setMinimumWidth(140);render=QPushButton("Render Missing Variants");render.clicked.connect(self.render_missing);self.render_button=render
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
@@ -392,7 +392,7 @@ class VehicleVariantsPage(QWidget):
         action_row.addStretch();b.addLayout(action_row)
         self.compatibility=QLabel("Select the correct model/template before rendering.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
-        self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.load_folder()
+        self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.template_box.currentIndexChanged.connect(self.refresh);self.load_folder()
     def folder_name(self):
         return (self.folder.currentData() or self.folder.currentText()).strip()
 
@@ -431,10 +431,9 @@ class VehicleVariantsPage(QWidget):
                 self.status.setText(f"Loaded {len(models):,} models • scanned 0 textures for {folder} • DB matches: {samples or 'none'}")
         finally:self.load_button.setEnabled(True)
     @staticmethod
-    def template_model_name(filename):
+    def is_template_texture(filename):
         import re
-        m=re.match(r"^t(\\d{3}[a-z0-9]+?)(?:_|\\.)",str(filename),re.IGNORECASE)
-        return f"m{m.group(1).lower()}.model" if m else None
+        return bool(re.match(r"^t\d{3}[a-z0-9]*_",str(filename),re.IGNORECASE))
 
     @staticmethod
     def layout_signature(path):
@@ -457,13 +456,20 @@ class VehicleVariantsPage(QWidget):
         return max(0.0,1.0-rms)
 
     def classify_templates(self,textures):
+        previous=self.template_box.currentData()
         refs=[]
         for t in textures:
-            model=self.template_model_name(t["filename"])
-            if not model:continue
+            if not self.is_template_texture(t["filename"]):continue
             sig=self.layout_signature(t["path"])
-            if sig:refs.append({"filename":t["filename"],"path":t["path"],"model":model,"sig":sig})
+            if sig:refs.append({"filename":t["filename"],"path":t["path"],"sig":sig})
         self.template_refs=refs;self.template_assignments={}
+        self.template_box.blockSignals(True);self.template_box.clear()
+        self.template_box.addItem("Choose reference template…",None)
+        for r in refs:self.template_box.addItem(r["filename"],r["path"])
+        if previous:
+            idx=self.template_box.findData(previous)
+            if idx>=0:self.template_box.setCurrentIndex(idx)
+        self.template_box.blockSignals(False)
         for pid,paths in self.sets:
             body=next((p for p in paths if (self.product_id(Path(p).name) or (None,None))[1]==1),None)
             sig=self.layout_signature(body) if body else None
@@ -471,13 +477,13 @@ class VehicleVariantsPage(QWidget):
             if scored:
                 best,r=scored[0];second=scored[1][0] if len(scored)>1 else 0.0
                 if best>=0.84 and best-second>=0.015:
-                    self.template_assignments[pid]={"model":r["model"],"template":r["filename"],"score":best,"margin":best-second}
+                    self.template_assignments[pid]={"template_path":r["path"],"template":r["filename"],"score":best,"margin":best-second}
 
     def compatible_sets(self,model=None):
-        model=model or self.current_model()
-        if not model:return []
-        target=Path(model["filename"]).name.lower()
-        return [x for x in self.sets if self.template_assignments.get(x[0],{}).get("model")==target]
+        if not (model or self.current_model()):return []
+        template_path=self.template_box.currentData()
+        if not template_path:return []
+        return [x for x in self.sets if self.template_assignments.get(x[0],{}).get("template_path")==template_path]
 
     def discover(self):
         groups={};textures=self.db.textures_in_folder(self.folder_name(),100000);self.raw_texture_count=len(textures)
@@ -501,13 +507,13 @@ class VehicleVariantsPage(QWidget):
                 buttons=QHBoxLayout();tex=QPushButton("Open Texture Set");tex.clicked.connect(lambda _,pp=paths:self.open_textures(pp));delete=QPushButton("Delete Render");delete.clicked.connect(lambda _,pp=paths:self.delete_variant(pp));buttons.addWidget(tex);buttons.addWidget(delete);v.addLayout(buttons);grid.addWidget(card,shown//4,shown%4);shown+=1
         if not shown:grid.addWidget(QLabel("No mapped variant renders yet for this model. Choose a model with a recognized template family."),0,0)
         self.area.setWidget(host)
-        compatible=self.compatible_sets(self.model)
-        mapped=len(self.template_assignments);unmapped=len(self.sets)-mapped
-        if self.model:
-            refs=[r for r in self.template_refs if r["model"]==Path(self.model["filename"]).name.lower()]
-            refnames=", ".join(r["filename"] for r in refs[:3]) or "no named template reference"
-            self.compatibility.setText(f"Template Intelligence • {len(compatible):,} PID sets mapped to {self.model['filename']} • reference: {refnames} • {unmapped:,} uncertain/unmapped excluded")
-        self.status.setText(f"{len(self.sets):,} PID sets • {mapped:,} confidently mapped • {unmapped:,} unmapped • {cached:,} rendered for selected model")
+        compatible=self.compatible_sets(self.model);mapped=len(self.template_assignments);unmapped=len(self.sets)-mapped
+        template_name=self.template_box.currentText() if self.template_box.currentData() else None
+        if self.model and template_name:
+            self.compatibility.setText(f"Template Intelligence • {len(compatible):,} PID sets match {template_name} → render on {self.model['filename']} • {unmapped:,} uncertain/unmapped excluded")
+        elif self.model:
+            self.compatibility.setText(f"Choose the reference template that belongs to {self.model['filename']}. Inspector will not infer template→model relationships.")
+        self.status.setText(f"{len(self.sets):,} PID sets • {mapped:,} confidently classified by template • {unmapped:,} unmapped • {cached:,} rendered for this model/template")
     def delete_variant(self,paths):
         if not self.model:return
         remove_cached_variant(self.model["path"],paths);self.refresh()
@@ -546,10 +552,15 @@ class VehicleVariantsPage(QWidget):
             self.status.setText("A render batch is still stopping. Wait for Stopped before starting again.");return
         self.model=self.current_model()
         if not self.model:return
-        missing=[x for x in self.compatible_sets(self.model) if not cached_variant_thumbnail(self.model["path"],x[1])]
-        if not missing:self.status.setText("All discovered texture sets are already rendered on this model.");return
+        compatible=self.compatible_sets(self.model)
+        if not self.template_box.currentData():
+            QMessageBox.warning(self,APP_NAME,"Choose the reference template that belongs to the selected model before rendering.");return
+        if not compatible:
+            self.status.setText("No PID texture sets confidently match the selected reference template.");return
+        missing=[x for x in compatible if not cached_variant_thumbnail(self.model["path"],x[1])]
+        if not missing:self.status.setText("All mapped texture sets for this model/template are already rendered.");return
         model_name=self.model.get("filename",Path(self.model["path"]).name)
-        answer=QMessageBox.question(self,"Confirm Variant Model",f"Render {len(missing):,} texture sets on {model_name}?\\n\\nInspector will render only texture sets confidently matched to this model's named template family. Uncertain/unmapped sets are excluded.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        answer=QMessageBox.question(self,"Confirm Variant Model",f"Render {len(missing):,} texture sets matched to {self.template_box.currentText()} on {model_name}?\\n\\nThe model/template pairing is explicit; Inspector will not guess it. Uncertain/unmapped sets are excluded.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer!=QMessageBox.Yes:return
         self.progress.setRange(0,len(missing));self.progress.setValue(0);self.progress.setFormat("%v / %m • %p%");self.render_button.setEnabled(False);self.cancel_button.setEnabled(True);worker_count=int(self.workers.currentText());engine_name="persistent" if self.engine.currentIndex()==0 else "one-shot";self.status.setText(f"Starting {engine_name} render • {len(missing):,} missing variants • {worker_count} worker(s)…");self.task=VariantRenderTask(self.model,missing,worker_count,self.engine.currentIndex()==0);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,pid,rate,remaining):
