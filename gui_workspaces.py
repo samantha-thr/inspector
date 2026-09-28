@@ -8,7 +8,7 @@ from PySide6.QtWidgets import *
 from config import APP_NAME, DATABASE_PATH, DEFAULT_SCAN_PATH
 from there_texture_decoder import open_texture_image
 from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_conversion_job, inspect_conversion_source, prepare_conversion_job
-from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION, cached_variant_thumbnail, render_model_variant, remove_cached_variant
+from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION, cached_variant_thumbnail, render_model_variant, remove_cached_variant, PersistentVariantWorker
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -186,7 +186,7 @@ class ThumbnailStudio(QWidget):
         h=QLabel("Visual Library");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Build, browse and manage cached LOD0 renders for the indexed model library."))
         r=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText("Optional filename/folder/path filter");self.search.returnPressed.connect(self.refresh)
         self.count=QComboBox();self.count.addItems(["25","50","100","250","500","1000","All"]);self.count.setCurrentText("100")
-        self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.workers.setToolTip("Parallel Blender render processes. 2 is a safe default; 3–4 may be faster on high-core systems.")
+        self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.engine=QComboBox();self.engine.addItems(["Persistent (fast)","One-shot (safe)"]);self.workers.setToolTip("Parallel Blender render processes. 2 is a safe default; 3–4 may be faster on high-core systems.")
         self.view=QComboBox();self.view.addItems(["Cached only","All models","Missing renders","Failed renders"])
         go=QPushButton("Render Missing");go.clicked.connect(self.start);refresh=QPushButton("Refresh Gallery");refresh.clicked.connect(self.refresh)
         for w in (self.search,QLabel("Batch"),self.count,QLabel("Workers"),self.workers,QLabel("View"),self.view,go,refresh):r.addWidget(w)
@@ -299,51 +299,77 @@ class ThumbnailStudio(QWidget):
 
 class VariantRenderTask(QThread):
     progress=Signal(int,int,str,float,float);done=Signal(object)
-    def __init__(self,model,sets,workers=2):
-        super().__init__();self.model=model;self.sets=sets;self.workers=max(1,workers);self.cancelled=False;self.cancel_event=threading.Event()
-    def cancel(self): self.cancelled=True;self.cancel_event.set()
+    def __init__(self,model,sets,workers=2,persistent=True):
+        super().__init__();self.model=model;self.sets=sets;self.workers=max(1,workers);self.persistent=persistent;self.cancelled=False;self.cancel_event=threading.Event();self.active_workers=[];self.worker_lock=threading.Lock()
+    def cancel(self):
+        self.cancelled=True;self.cancel_event.set()
+        with self.worker_lock:
+            for worker in list(self.active_workers):
+                try: worker.close(force=True)
+                except Exception: pass
     def run(self):
-        ok=failed=cached=0;completed=0;total=len(self.sets);started=time.monotonic();failures=[]
+        ok=failed=cached=0;completed=0;total=len(self.sets);started=time.monotonic();failures=[];local=threading.local()
+        seed=self.sets[0][1] if self.sets else []
+        def make_worker():
+            w=PersistentVariantWorker(self.model["path"],seed,512,self.cancel_event,threading.get_ident())
+            with self.worker_lock:self.active_workers.append(w)
+            return w
+        def drop_worker(w):
+            if not w:return
+            try:w.close(force=True)
+            except Exception:pass
+            with self.worker_lock:
+                if w in self.active_workers:self.active_workers.remove(w)
         def one(item):
             pid,paths=item
-            if self.cancel_event.is_set(): return pid,{"success":False,"cancelled":True}
-            return pid,render_model_variant(self.model["path"],paths,512,False,self.cancel_event)
-        pool=ThreadPoolExecutor(max_workers=self.workers)
-        futures={}
+            if self.cancel_event.is_set():return pid,paths,{"success":False,"cancelled":True}
+            if not self.persistent:return pid,paths,render_model_variant(self.model["path"],paths,512,False,self.cancel_event)
+            try:
+                if not getattr(local,"worker",None):local.worker=make_worker();local.jobs=0
+                if local.jobs>=200:
+                    drop_worker(local.worker);local.worker=make_worker();local.jobs=0
+                r=local.worker.render(pid,paths,False);local.jobs+=1
+                if not r.get("success") and not r.get("cached") and not r.get("cancelled") and (local.worker.proc is None or local.worker.proc.poll() is not None):
+                    drop_worker(local.worker);local.worker=make_worker();local.jobs=0;r=local.worker.render(pid,paths,False);local.jobs+=1
+                return pid,paths,r
+            except Exception as exc:
+                return pid,paths,{"success":False,"cancelled":self.cancel_event.is_set(),"message":str(exc)}
+        pool=ThreadPoolExecutor(max_workers=self.workers);futures={}
         try:
-            # Keep only one wave of work submitted. This prevents Executor's
-            # internal queue from owning the entire 1,700-item batch.
             iterator=iter(self.sets)
             for _ in range(self.workers):
                 try:
                     item=next(iterator);futures[pool.submit(one,item)]=item
-                except StopIteration: break
+                except StopIteration:break
             while futures and not self.cancel_event.is_set():
                 done,_=wait(tuple(futures),timeout=.20,return_when=FIRST_COMPLETED)
-                if not done: continue
+                if not done:continue
                 for future in done:
-                    futures.pop(future,None)
-                    try: pid,r=future.result()
+                    item=futures.pop(future,None)
+                    try:pid,paths,r=future.result()
                     except Exception as exc:
-                        pid="error";r={"success":False,"message":str(exc)}
-                    if r.get("cancelled"): continue
+                        pid=item[0] if item else "error";paths=item[1] if item else [];r={"success":False,"message":str(exc)}
+                    if r.get("cancelled"):continue
                     completed+=1
-                    if r.get("cached"): cached+=1
-                    elif r.get("success"): ok+=1
+                    if r.get("cached"):cached+=1
+                    elif r.get("success"):ok+=1
                     else:
-                        failed+=1
-                        failures.append({"pid":pid,"paths":list(dict(futures.get(future,("",[])))[1]) if False else [],"returncode":r.get("returncode"),"message":r.get("message") or "Blender render failed","log":r.get("log",""),"output":r.get("output","")})
+                        failed+=1;failures.append({"pid":pid,"paths":list(paths),"returncode":r.get("returncode"),"message":r.get("message") or "Blender render failed","log":r.get("log",""),"output":r.get("output","")})
                     elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
                     self.progress.emit(completed,total,pid,rate,remaining)
                     if not self.cancel_event.is_set():
                         try:
                             item=next(iterator);futures[pool.submit(one,item)]=item
-                        except StopIteration: pass
+                        except StopIteration:pass
             if self.cancel_event.is_set():
-                for future in futures: future.cancel()
+                for future in futures:future.cancel()
         finally:
+            self.cancel_event.set()
+            with self.worker_lock:
+                workers=list(self.active_workers)
+            for worker in workers:drop_worker(worker)
             pool.shutdown(wait=True,cancel_futures=True)
-        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"cancelled":self.cancelled,"completed":completed,"failures":failures})
+        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"cancelled":self.cancelled,"completed":completed,"failures":failures,"engine":"persistent" if self.persistent else "one-shot"})
 
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
@@ -354,7 +380,7 @@ class VehicleVariantsPage(QWidget):
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
-        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Workers"),self.workers,render,self.cancel_button,self.failures_button,self.delete_all_button):r.addWidget(w)
+        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,render,self.cancel_button,self.failures_button,self.delete_all_button):r.addWidget(w)
         b.addLayout(r);self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.load_folder()
     @staticmethod
@@ -439,7 +465,7 @@ class VehicleVariantsPage(QWidget):
         if not self.model:return
         missing=[x for x in self.sets if not cached_variant_thumbnail(self.model["path"],x[1])]
         if not missing:self.status.setText("All discovered texture sets are already rendered on this model.");return
-        self.progress.setRange(0,len(missing));self.progress.setValue(0);self.progress.setFormat("%v / %m • %p%");self.render_button.setEnabled(False);self.cancel_button.setEnabled(True);worker_count=int(self.workers.currentText());self.status.setText(f"Starting render • {len(missing):,} missing variants • {worker_count} worker(s)…");self.task=VariantRenderTask(self.model,missing,worker_count);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
+        self.progress.setRange(0,len(missing));self.progress.setValue(0);self.progress.setFormat("%v / %m • %p%");self.render_button.setEnabled(False);self.cancel_button.setEnabled(True);worker_count=int(self.workers.currentText());engine_name="persistent" if self.engine.currentIndex()==0 else "one-shot";self.status.setText(f"Starting {engine_name} render • {len(missing):,} missing variants • {worker_count} worker(s)…");self.task=VariantRenderTask(self.model,missing,worker_count,self.engine.currentIndex()==0);self.task.progress.connect(self.on_progress);self.task.done.connect(self.finished);self.task.start()
     def on_progress(self,i,total,pid,rate,remaining):
         self.progress.setValue(i);self.status.setText(f"Rendering {i:,} / {total:,} • PID {pid} • {rate:.2f}/sec • ETA {ThumbnailBatchTask._fmt(remaining)}")
     def show_failures(self):
