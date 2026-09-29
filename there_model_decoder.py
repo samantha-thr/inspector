@@ -630,17 +630,18 @@ def _resolve_material_texture_bindings(
     model: DecodedModel,
     model_path: Path,
     linked_textures: list[Path],
-) -> tuple[dict[int, Path | None], list[dict[str, Any]]]:
-    """Resolve product textures from the model itself.
+) -> tuple[dict[int, Path | None], list[dict[str, Any]], dict[tuple[int, int], Path]]:
+    """Resolve texture maps from the material map table encoded in the model.
 
-    Normal There product models are model-driven: first honor embedded texture
-    references, then use PID texture ordinal as a fallback. BG is the sole
-    special case with a color+opacity window companion.
+    Non-BG models are entirely model-driven: product textures are assigned
+    across the model's actual map entries (color, opacity/cutout, detail,
+    gloss, emission, normal) in encoded material/map order. Exact embedded
+    filename matches take priority. BG alone keeps its historical body/window
+    color/window-opacity convention.
     """
     linked = [Path(p) for p in linked_textures if Path(p).exists()]
-    assignments: dict[int, Path | None] = {m.index: None for m in model.materials}
-    sources: dict[int, str] = {m.index: "unassigned" for m in model.materials}
-    profile = "bg-window-opacity" if _is_bg_model_path(model_path) else "model-driven"
+    profile = "bg-window-opacity" if _is_bg_model_path(model_path) else "model-driven-maps"
+    map_roles = {0:"color",1:"opacity",2:"cutout",3:"lighting/detail",4:"gloss",5:"emission",6:"normal"}
 
     import re
     product_slots: dict[int, Path] = {}
@@ -652,138 +653,138 @@ def _resolve_material_texture_bindings(
         else:
             unslotted.append(p)
 
+    targets = []
+    for material in model.materials:
+        for bit, embedded in sorted(material.texture_maps.items()):
+            targets.append((material, bit, embedded))
+
+    map_assignments: dict[tuple[int, int], Path] = {}
+    sources: dict[tuple[int, int], str] = {}
+    used_linked: set[str] = set()
+
     def norm_tex_name(value):
         name = Path(str(value).replace("\\", "/")).name.lower()
         return name[:-4] if name.endswith(".dds") else name
 
-    # 1) Strongest evidence: the model's own embedded texture name matches a
-    # supplied PID texture.
     linked_by_name = {norm_tex_name(p.name): p for p in linked}
-    for material in model.materials:
-        for embedded in material.textures:
-            key = norm_tex_name(embedded)
-            hit = linked_by_name.get(key)
-            if hit is None:
-                hit = next((p for k, p in linked_by_name.items()
-                            if k == key or k.startswith(key + ".")), None)
-            if hit is not None:
-                assignments[material.index] = hit
-                sources[material.index] = f"embedded-name:{embedded}"
-                break
+    # Strongest evidence: an encoded model map names the supplied product texture.
+    for material, bit, embedded in targets:
+        key = norm_tex_name(embedded)
+        hit = linked_by_name.get(key)
+        if hit is None:
+            hit = next((p for k,p in linked_by_name.items()
+                        if k == key or k.startswith(key + ".")), None)
+        if hit is not None:
+            target=(material.index,bit)
+            map_assignments[target]=hit
+            sources[target]=f"embedded-name:{embedded}"
+            used_linked.add(str(hit.resolve()))
 
-    if product_slots:
+    if linked:
         if profile == "bg-window-opacity":
-            # BG alone uses the special body / window color / window opacity
-            # convention. Support both known generations.
-            present = set(product_slots)
-            window_color_slot = 3 if {3, 4}.issubset(present) else (2 if {2, 3}.issubset(present) else None)
-            body_material = next((m for m in model.materials
-                                  if (m.map_mask & (1 << 0))
-                                  and not (m.map_mask & ((1 << 1) | (1 << 2)))), None)
-            window_material = next((m for m in model.materials
-                                    if (m.map_mask & (1 << 0))
-                                    and (m.map_mask & (1 << 1))), None)
-            if body_material is None and model.materials:
-                body_material = model.materials[0]
-            if window_material is None and len(model.materials) >= 2:
-                window_material = model.materials[1]
-            if 1 in product_slots and body_material and assignments[body_material.index] is None:
-                assignments[body_material.index] = product_slots[1]
-                sources[body_material.index] = "bg-body-slot:_1"
-            if window_color_slot and window_material and assignments[window_material.index] is None:
-                assignments[window_material.index] = product_slots[window_color_slot]
-                sources[window_material.index] = f"bg-window-color-slot:_{window_color_slot}"
-            # Any remaining BG texture slots can still populate otherwise
-            # unassigned materials by ordinal, but never reinterpret them as
-            # window/opacity semantics here.
-            for slot, p in sorted(product_slots.items()):
-                if slot in (1, window_color_slot):
-                    continue
-                idx = slot - 1
-                if idx in assignments and assignments[idx] is None:
-                    assignments[idx] = p
-                    sources[idx] = f"bg-ordinal-fallback:_{slot}"
+            present=set(product_slots)
+            color_slot = 3 if {3,4}.issubset(present) else (2 if {2,3}.issubset(present) else None)
+            alpha_slot = 4 if color_slot==3 else (3 if color_slot==2 else None)
+            body = next((m for m in model.materials
+                         if (m.map_mask & 1) and not (m.map_mask & 6)),None)
+            window = next((m for m in model.materials
+                           if (m.map_mask & 1) and (m.map_mask & 2)),None)
+            if body is None and model.materials: body=model.materials[0]
+            if window is None and len(model.materials)>=2: window=model.materials[1]
+            if body and 1 in product_slots:
+                target=(body.index,0)
+                map_assignments[target]=product_slots[1];sources[target]="bg-body-slot:_1";used_linked.add(str(product_slots[1].resolve()))
+            if window and color_slot:
+                target=(window.index,0)
+                map_assignments[target]=product_slots[color_slot];sources[target]=f"bg-window-color-slot:_{color_slot}";used_linked.add(str(product_slots[color_slot].resolve()))
+            if window and alpha_slot:
+                alpha_bit=1 if (window.map_mask & (1<<1)) else (2 if (window.map_mask & (1<<2)) else None)
+                if alpha_bit is not None:
+                    target=(window.index,alpha_bit)
+                    map_assignments[target]=product_slots[alpha_slot];sources[target]=f"bg-window-opacity-slot:_{alpha_slot}";used_linked.add(str(product_slots[alpha_slot].resolve()))
+            # If a BG model has additional genuine maps/textures, fill only the
+            # remaining encoded map targets in slot order.
+            leftovers=[p for _,p in sorted(product_slots.items()) if str(p.resolve()) not in used_linked]
         else:
-            # Every non-BG product model simply receives its product texture(s).
-            # Read the model to find paintable/color-map materials; texture slot
-            # order maps across those materials, not across arbitrary materials.
-            # Embedded-name matching above remains the strongest evidence.
-            paint_materials = [m for m in model.materials if m.map_mask & (1 << 0)]
-            if not paint_materials:
-                paint_materials = list(model.materials)
-            for slot, p in sorted(product_slots.items()):
-                ordinal = slot - 1
-                if 0 <= ordinal < len(paint_materials):
-                    idx = paint_materials[ordinal].index
-                    if assignments[idx] is None:
-                        assignments[idx] = p
-                        sources[idx] = f"product-color-material-slot:_{slot}"
-    elif unslotted:
-        for material, p in zip(model.materials, sorted(unslotted, key=lambda x: x.name.lower())):
-            if assignments[material.index] is None:
-                assignments[material.index] = p
-                sources[material.index] = "unslotted-order"
+            leftovers=[p for _,p in sorted(product_slots.items()) if str(p.resolve()) not in used_linked]
+            leftovers.extend(p for p in sorted(unslotted,key=lambda x:x.name.lower()) if str(p.resolve()) not in used_linked)
 
-    # 2) Fill any material still unassigned from the resource path explicitly
-    # embedded in the model. This keeps official/default materials intact.
-    resource_root = None
-    parts = list(model_path.resolve().parts)
+        remaining_targets=[(m,b,e) for m,b,e in targets if (m.index,b) not in map_assignments]
+        for p,(material,bit,embedded) in zip(leftovers,remaining_targets):
+            target=(material.index,bit)
+            map_assignments[target]=p
+            sources[target]=f"product-map-order:{map_roles.get(bit,bit)}"
+            used_linked.add(str(p.resolve()))
+
+    # Fill any still-unassigned map from the exact official/default resource
+    # reference encoded in the model itself.
+    resource_root=None
+    parts=list(model_path.resolve().parts)
     try:
-        resources_index = [p.lower() for p in parts].index("resources")
-        resource_root = Path(*parts[: resources_index + 1])
+        resources_index=[p.lower() for p in parts].index("resources")
+        resource_root=Path(*parts[:resources_index+1])
     except ValueError:
         pass
 
-    for material in model.materials:
-        if assignments[material.index] is not None:
-            continue
-        for embedded in material.textures:
-            candidates = []
-            embedded_path = Path(embedded.replace("/", str(Path("/"))))
-            if resource_root:
-                candidates.extend([
-                    resource_root / embedded_path,
-                    resource_root / Path(str(embedded_path) + ".dds"),
-                    resource_root / embedded_path.with_suffix(embedded_path.suffix + ".dds"),
-                ])
+    for material,bit,embedded in targets:
+        target=(material.index,bit)
+        if target in map_assignments: continue
+        embedded_path=Path(embedded.replace("/",str(Path("/"))))
+        candidates=[]
+        if resource_root:
             candidates.extend([
-                model_path.parent / embedded_path.name,
-                model_path.parent / (embedded_path.name + ".dds"),
+                resource_root/embedded_path,
+                resource_root/Path(str(embedded_path)+".dds"),
+                resource_root/embedded_path.with_suffix(embedded_path.suffix+".dds"),
             ])
-            for candidate in candidates:
-                if candidate.exists():
-                    assignments[material.index] = candidate
-                    sources[material.index] = f"embedded-resource:{embedded}"
-                    break
-            if assignments[material.index] is not None:
+        candidates.extend([
+            model_path.parent/embedded_path.name,
+            model_path.parent/(embedded_path.name+".dds"),
+        ])
+        for candidate in candidates:
+            if candidate.exists():
+                map_assignments[target]=candidate
+                sources[target]=f"embedded-resource:{embedded}"
                 break
 
-    details = []
-    used = {str(p.resolve()) for p in assignments.values() if p is not None}
+    # OBJ/MTL base-color assignment is just map bit 0. Other maps are applied
+    # explicitly in Blender from the returned binding plan.
+    material_assignments: dict[int, Path | None]={m.index:None for m in model.materials}
     for material in model.materials:
-        assigned = assignments[material.index]
+        material_assignments[material.index]=map_assignments.get((material.index,0))
+
+    details=[]
+    for material,bit,embedded in targets:
+        assigned=map_assignments.get((material.index,bit))
         details.append({
-            "profile": profile,
-            "material_index": material.index,
-            "material_name": material.name,
-            "map_mask": material.map_mask,
-            "map_bits": [b for b in range(7) if material.map_mask & (1 << b)],
-            "embedded_textures": list(material.textures),
-            "assigned_texture": str(assigned.resolve()) if assigned else None,
-            "source": sources[material.index],
+            "profile":profile,
+            "material_index":material.index,
+            "material_name":material.name,
+            "map_bit":bit,
+            "map_role":map_roles.get(bit,f"map-{bit}"),
+            "embedded_texture":embedded,
+            "assigned_texture":str(assigned.resolve()) if assigned else None,
+            "source":sources.get((material.index,bit),"unassigned"),
+            "bool_values":material.bool_values,
         })
-    color_materials = [m for m in model.materials if m.map_mask & (1 << 0)]
+
+    used={str(p.resolve()) for p in map_assignments.values()}
+    assigned_materials={mi for (mi,_),p in map_assignments.items() if p is not None}
+    color_materials=[m for m in model.materials if (m.index,0) in [(x[0],x[1]) for x in map_assignments.keys()] or (m.map_mask & 1)]
     details.append({
-        "profile": profile,
-        "summary": True,
-        "linked_texture_count": len(linked),
-        "assigned_material_count": sum(1 for p in assignments.values() if p is not None),
-        "material_count": len(model.materials),
-        "color_material_count": len(color_materials),
-        "unassigned_color_materials": [m.name for m in color_materials if assignments[m.index] is None],
-        "unused_linked_textures": [str(p.resolve()) for p in linked if str(p.resolve()) not in used],
+        "profile":profile,
+        "summary":True,
+        "linked_texture_count":len(linked),
+        "material_count":len(model.materials),
+        "map_target_count":len(targets),
+        "assigned_map_count":len(map_assignments),
+        "assigned_material_count":len(assigned_materials),
+        "color_material_count":sum(1 for m in model.materials if m.map_mask & 1),
+        "unassigned_color_materials":[m.name for m in model.materials if (m.map_mask & 1) and (m.index,0) not in map_assignments],
+        "unassigned_maps":[f"{m.name}:{map_roles.get(bit,bit)}" for m,bit,_ in targets if (m.index,bit) not in map_assignments],
+        "unused_linked_textures":[str(p.resolve()) for p in linked if str(p.resolve()) not in used],
     })
-    return assignments, details
+    return material_assignments, details, map_assignments
 
 
 def _resolve_material_textures(
@@ -791,7 +792,7 @@ def _resolve_material_textures(
     model_path: Path,
     linked_textures: list[Path],
 ) -> dict[int, Path | None]:
-    assignments, _ = _resolve_material_texture_bindings(model, model_path, linked_textures)
+    assignments, _, _ = _resolve_material_texture_bindings(model, model_path, linked_textures)
     return assignments
 
 def export_obj(
@@ -812,7 +813,7 @@ def export_obj(
 
     linked = [Path(p) for p in (linked_textures or [])]
     model_path = Path(model.path)
-    texture_assignments, binding_details = _resolve_material_texture_bindings(model, model_path, linked)
+    texture_assignments, binding_details, map_assignments = _resolve_material_texture_bindings(model, model_path, linked)
     is_bg_variant = _is_bg_model_path(model_path)
 
     mtl_path = output_path.with_suffix(".mtl")
