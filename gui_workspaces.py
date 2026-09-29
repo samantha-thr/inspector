@@ -484,7 +484,7 @@ class VehicleVariantsPage(QWidget):
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
         for w in (QLabel("Workers"),self.workers,config,uv_analyze,resolve,QLabel("Sample"),self.sample_size,sample,self.render_button,self.cancel_button,self.failures_button,self.export_render_button,self.delete_all_button):action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
-        self.compatibility=QLabel("Resolver status: authoritative PID/model matches and explicit rules only.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
+        self.compatibility=QLabel("Resolver status: verified PID/model matches and explicit official default-model rules.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.template_box.currentIndexChanged.connect(self.refresh);self.load_folder()
     def folder_name(self):
@@ -629,7 +629,7 @@ class VehicleVariantsPage(QWidget):
         if not shown:grid.addWidget(QLabel("No products match this view."),0,0)
         elif len(filtered)>500:grid.addWidget(QLabel(f"Showing first 500 of {len(filtered):,}; use the view filter to narrow the list."),(shown//4)+1,0,1,4)
         self.area.setWidget(host)
-        self.compatibility.setText(f"Resolver • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • exact client evidence only")
+        self.compatibility.setText(f"Resolver • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • verified model assignments only")
         self.status.setText(f"{len(self.sets):,} PID sets • {cached_count:,} rendered • {missing_count:,} resolved/missing • {summary['unresolved']:,} unresolved • showing {min(len(filtered),500):,}")
 
     def _resolved_assignments(self):
@@ -657,7 +657,7 @@ class VehicleVariantsPage(QWidget):
 
     def show_resolution_preview(self):
         folder=self.folder_name();assignments=self._resolved_assignments();summary=resolution_summary(assignments)
-        d=QDialog(self);d.setWindowTitle(f"Vehicle Resolution Preview — {folder}");d.resize(1180,780);v=QVBoxLayout(d)
+        d=QDialog(self);d.setWindowTitle(f"Product Resolution Preview — {folder}");d.resize(1180,780);v=QVBoxLayout(d)
         head=QLabel();head.setObjectName("title");v.addWidget(head)
         note=QLabel("Resolution uses verified client evidence: exact numeric PID models and explicitly configured official default models. ACONF presence/raw strings are evidence only; unknown fields are not interpreted.");note.setWordWrap(True);v.addWidget(note)
         controls=QHBoxLayout();flt=QComboBox();flt.addItems(["All","Resolved","Unresolved","Exact PID","Official default"]);export=QPushButton("Export Resolution Report");details=QPushButton("ACONF Details")
