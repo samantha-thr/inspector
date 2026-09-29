@@ -769,11 +769,13 @@ class VehicleVariantsPage(QWidget):
 
     def resolved_full_finished(self,result):
         self.render_button.setEnabled(True);self.sample_button.setEnabled(True);self.cancel_button.setEnabled(False);self.task=None
-        self.last_failures=result.get("failures",[]);self.failures_button.setEnabled(bool(self.last_failures));self.refresh()
+        self.last_failures=result.get("failures",[]);self.failures_button.setEnabled(bool(self.last_failures))
+        self.last_render_report={"folder":self.folder_name(),"scope":"resolved-missing","created":time.strftime("%Y-%m-%d %H:%M:%S"),"result":result};self.export_render_button.setEnabled(True)
+        self.refresh()
         if result.get("cancelled"):
-            self.status.setText(f"Stopped • completed {result.get('completed',0):,} • rendered {result.get('rendered',0):,} • failed {result.get('failed',0):,}")
+            self.status.setText(f"Stopped • completed {result.get('completed',0):,} • rendered {result.get('rendered',0):,} • failed {result.get('failed',0):,} • completed results are exportable")
         else:
-            self.progress.setValue(self.progress.maximum());self.status.setText(f"Resolver render complete • rendered {result.get('rendered',0):,} • cached {result.get('cached',0):,} • failed {result.get('failed',0):,}")
+            self.progress.setValue(self.progress.maximum());self.status.setText(f"Resolver render complete • rendered {result.get('rendered',0):,} • cached {result.get('cached',0):,} • failed {result.get('failed',0):,} • results ready to export")
 
     def analyze_uv_families(self):
         """Decode every model in the selected folder and group exact LOD0 UV layouts."""
