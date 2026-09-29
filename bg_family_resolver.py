@@ -14,7 +14,7 @@ from there_texture_decoder import open_texture_image
 from there_model_decoder import decode_model
 
 
-CACHE_VERSION = 8
+CACHE_VERSION = 9
 CACHE_PATH = Path("cache/bg_family_resolution.json")
 REPORT_ROOT = Path("reports/bg_family_analysis")
 QUANTILES = (0.70, 0.80, 0.85)
@@ -33,7 +33,7 @@ MIN_BORDER_BACKGROUND_SHARE = 0.15
 MIN_FOREGROUND_FRACTION = 0.04
 MAX_FOREGROUND_FRACTION = 0.96
 MIN_TEXTURE_STDDEV = 5.0
-ANALYSIS_ALGORITHM = "background-removed-uv-outline-v2"
+ANALYSIS_ALGORITHM = "background-removed-uv-outline-v3-diagnostics"
 
 
 def _slot(path):
@@ -480,6 +480,33 @@ def analyze_bg_families(product_sets,models,rules=None):
         anchor=next(a for a in anchors if a["model"]==winner)
         clear=confidence_tier is not None
 
+        # Diagnostic acceptance math. These values are exported for every PID so
+        # reviewed samples can show exactly which gate accepted/rejected it.
+        strict_score_gap=score80-MIN_WINNER_SCORE
+        strict_margin_gap=margin-MIN_MARGIN
+        relaxed_score_gap=score80-RELAXED_MIN_SCORE
+        relaxed_margin_gap=margin-RELAXED_MIN_MARGIN
+        corroborated_score_gap=score80-CORROBORATED_MIN_SCORE
+        corroborated_margin_gap=margin-CORROBORATED_MIN_MARGIN
+
+        if strict_clear:
+            decision_reason="accepted: strict score/margin + 2 votes"
+        elif outline_clear:
+            decision_reason="accepted: UV + template outlines agree"
+        elif corroborated_clear:
+            decision_reason="accepted: 3+ independent signals corroborate"
+        else:
+            blockers=[]
+            if score80<RELAXED_MIN_SCORE:
+                blockers.append(f"score {score80:.4f} < relaxed {RELAXED_MIN_SCORE:.4f}")
+            if margin<RELAXED_MIN_MARGIN:
+                blockers.append(f"margin {margin:.4f} < relaxed {RELAXED_MIN_MARGIN:.4f}")
+            if not primary_agree:
+                blockers.append(f"primary outlines disagree ({uv_winner} vs {template_winner})")
+            if vote_count<3:
+                blockers.append(f"only {vote_count} corroborating votes")
+            decision_reason="rejected: " + ("; ".join(blockers) if blockers else "no acceptance tier satisfied")
+
         if not clear:
             state="unresolved";method="BG template family ambiguous";model=None;counts["ambiguous"]+=1
         elif not anchor["paintable"]:
@@ -496,6 +523,10 @@ def analyze_bg_families(product_sets,models,rules=None):
             "score":round(score80,6),"margin":round(margin,6),"votes":vote_count,
             "confidence_tier":confidence_tier,"primary_agree":primary_agree,
             "uv_winner":uv_winner,"template_winner":template_winner,
+            "decision_reason":decision_reason,
+            "strict_score_gap":round(strict_score_gap,6),"strict_margin_gap":round(strict_margin_gap,6),
+            "relaxed_score_gap":round(relaxed_score_gap,6),"relaxed_margin_gap":round(relaxed_margin_gap,6),
+            "corroborated_score_gap":round(corroborated_score_gap,6),"corroborated_margin_gap":round(corroborated_margin_gap,6),
             "scores":{k:round(v,6) for k,v in combined.items()},
             "uv_scores":{k:round(v,6) for k,v in uv_scores.items()},
             "uv_metrics":{k:{mk:round(mv,6) for mk,mv in vals.items()} for k,vals in uv_metrics.items()},
@@ -545,9 +576,39 @@ def _write_report(payload):
     with open(cp,"w",newline="",encoding="utf-8-sig") as fh:
         w=csv.writer(fh)
         models=[a["model"] for a in payload.get("anchors",[])]
-        w.writerow(["pid","state","method","confidence_tier","primary_agree","uv_winner","template_winner","family_model","template","score","margin","votes","foreground_fraction","outline_fraction","border_background_share","stddev",*[f"combined:{m}" for m in models],*[f"uv_outline:{m}" for m in models],*[f"template_outline:{m}" for m in models],*[f"uv_precision:{m}" for m in models],*[f"uv_dice:{m}" for m in models],*[f"occupancy:{m}" for m in models]])
+        w.writerow([
+            "pid","state","method","confidence_tier","decision_reason",
+            "primary_agree","uv_winner","template_winner","family_model","template",
+            "score","margin","votes",
+            "strict_score_gap","strict_margin_gap",
+            "relaxed_score_gap","relaxed_margin_gap",
+            "corroborated_score_gap","corroborated_margin_gap",
+            "foreground_fraction","outline_fraction","border_background_share","stddev",
+            *[f"combined:{m}" for m in models],
+            *[f"uv_outline:{m}" for m in models],
+            *[f"template_outline:{m}" for m in models],
+            *[f"uv_precision:{m}" for m in models],
+            *[f"uv_dice:{m}" for m in models],
+            *[f"occupancy:{m}" for m in models]
+        ])
         for pid,x in sorted(payload.get("assignments",{}).items(),key=lambda kv:int(kv[0]) if kv[0].isdigit() else kv[0]):
-            occ=x.get("occupancy") or {};w.writerow([pid,x.get("state"),x.get("method"),x.get("confidence_tier",""),x.get("primary_agree",""),x.get("uv_winner",""),x.get("template_winner",""),x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),occ.get("foreground_fraction",""),occ.get("outline_fraction",""),occ.get("border_background_share",""),occ.get("stddev",""),*[x.get("scores",{}).get(m,"") for m in models],*[x.get("uv_outline_scores",{}).get(m,"") for m in models],*[x.get("template_outline_scores",{}).get(m,"") for m in models],*[x.get("uv_precision_scores",{}).get(m,"") for m in models],*[x.get("uv_scores",{}).get(m,"") for m in models],*[x.get("occupancy_scores",{}).get(m,"") for m in models]])
+            occ=x.get("occupancy") or {}
+            w.writerow([
+                pid,x.get("state"),x.get("method"),x.get("confidence_tier",""),x.get("decision_reason",""),
+                x.get("primary_agree",""),x.get("uv_winner",""),x.get("template_winner",""),
+                x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),
+                x.get("strict_score_gap",""),x.get("strict_margin_gap",""),
+                x.get("relaxed_score_gap",""),x.get("relaxed_margin_gap",""),
+                x.get("corroborated_score_gap",""),x.get("corroborated_margin_gap",""),
+                occ.get("foreground_fraction",""),occ.get("outline_fraction",""),
+                occ.get("border_background_share",""),occ.get("stddev",""),
+                *[x.get("scores",{}).get(m,"") for m in models],
+                *[x.get("uv_outline_scores",{}).get(m,"") for m in models],
+                *[x.get("template_outline_scores",{}).get(m,"") for m in models],
+                *[x.get("uv_precision_scores",{}).get(m,"") for m in models],
+                *[x.get("uv_scores",{}).get(m,"") for m in models],
+                *[x.get("occupancy_scores",{}).get(m,"") for m in models]
+            ])
     payload["report_csv"]=str(cp)
     payload["report_json"]=str(jp)
 
