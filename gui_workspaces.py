@@ -1,5 +1,5 @@
 from __future__ import annotations
-import csv, json, os, subprocess, time, threading
+import csv, json, os, re, subprocess, time, threading
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from pathlib import Path
 from PySide6.QtCore import Qt, QSettings, QThread, Signal
