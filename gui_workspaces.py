@@ -669,7 +669,7 @@ class IntelligencePage(QWidget):
             c.setObjectName("card");c.setAlignment(Qt.AlignCenter);c.setMinimumHeight(72);cards.addWidget(c)
         b.addLayout(cards)
         self.status=QLabel("Ready. Start with BG to validate the evidence model.");self.status.setWordWrap(True);b.addWidget(self.status)
-        self.table=QTableWidget(0,5);self.table.setHorizontalHeaderLabels(["Evidence","LOD","Asset A","Asset B","Fingerprint"]);self.table.setSelectionBehavior(QAbstractItemView.SelectRows);self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table=QTableWidget(0,6);self.table.setHorizontalHeaderLabels(["Evidence","LOD","Asset A","Asset B","Measured result","Fingerprint"]);self.table.setSelectionBehavior(QAbstractItemView.SelectRows);self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(4,QHeaderView.Stretch);b.addWidget(self.table,1)
         self.unknown=QPlainTextEdit();self.unknown.setReadOnly(True);self.unknown.setMaximumHeight(120);self.unknown.setPlaceholderText("Unsupported / unknown assets will be listed here instead of guessed.");b.addWidget(self.unknown)
 
@@ -698,7 +698,7 @@ class IntelligencePage(QWidget):
         self.table.setRowCount(len(rels))
         for r,x in enumerate(rels):
             lod="—" if x["lod"]<0 else f"LOD{x['lod']}"
-            for c,v in enumerate((x["evidence"],lod,x["filename_a"],x["filename_b"],x["fingerprint"][:20]+"…")):self.table.setItem(r,c,QTableWidgetItem(str(v)))
+            for c,v in enumerate((x["evidence"],lod,x["filename_a"],x["filename_b"],x.get("details",""),(x["fingerprint"][:20]+"…") if x.get("fingerprint") else "—")):self.table.setItem(r,c,QTableWidgetItem(str(v)))
             self.table.item(r,2).setToolTip(x["asset_a"]);self.table.item(r,3).setToolTip(x["asset_b"])
         self.unknown.setPlainText("\n".join(f"{x['filename']}: {x['reason']}" for x in unknown))
         counts=" • ".join(f"{k}: {v:,}" for k,v in sorted(result["counts"].items()))
