@@ -11,7 +11,7 @@ WORK_DIR=PROJECT_DIR/"cache"/"thumbnail_work"
 FAILURE_LOG=PROJECT_DIR/"cache"/"thumbnail_failures.jsonl"
 METADATA_DIR=PROJECT_DIR/"cache"/"model_thumbnail_meta"
 RENDER_VERSION=2
-VARIANT_RENDER_VERSION=7
+VARIANT_RENDER_VERSION=8
 VARIANT_CACHE_DIR=PROJECT_DIR/"cache"/"model_variants"
 
 def thumbnail_key(model_path):
@@ -140,7 +140,7 @@ def render_model_thumbnail(model_path,linked_textures=None,size=512,force=False)
     if success:
         write_render_metadata(model_path,out,size);clear_thumbnail_failure(model_path)
     else:log_thumbnail_failure(model_path,log[-4000:] or "Render failed",proc.returncode)
-    return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:]}
+    return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:],"binding_profile":export_info.get("binding_profile"),"texture_bindings":export_info.get("texture_bindings",[])}
 
 def render_model_variant(model_path,texture_paths,size=512,force=False,cancel_event=None):
     model_path=Path(model_path);texture_paths=[str(x) for x in texture_paths if x]
@@ -150,16 +150,18 @@ def render_model_variant(model_path,texture_paths,size=512,force=False,cancel_ev
     blender=find_blender()
     if not blender:return {"success":False,"message":"Blender not detected"}
     decoded=decode_model(model_path);key=variant_key(model_path,texture_paths,size);obj=WORK_DIR/f"variant_{key}.obj"
-    export_obj(decoded,obj,texture_paths,include_collision=False);script=_script(obj,out,size)
-    # Blender's OBJ/MTL importer does not reliably retain a separate map_d.
-    # Build the known There buggy window shader explicitly: _3=RGB, _4=opacity.
+    export_info=export_obj(decoded,obj,texture_paths,include_collision=False);script=_script(obj,out,size)
+    # BG alone uses the separate window color / window opacity convention.
+    # Every other There product model relies on the model-driven assignments
+    # already written to the OBJ/MTL by export_obj().
     import re
+    is_bg_variant=model_path.parent.name.lower()=="bg"
     slots={}
     for tp in texture_paths:
         m=re.match(r"^\d+_([1-9]\d*)\.",Path(tp).name,re.IGNORECASE)
         if m:slots[int(m.group(1))]=str(Path(tp).resolve())
-    window_color_slot,window_alpha_slot=(3,4) if 3 in slots and 4 in slots else ((2,3) if 2 in slots and 3 in slots else (None,None))
-    if window_color_slot and window_alpha_slot:
+    window_color_slot,window_alpha_slot=(3,4) if 3 in slots and 4 in slots else ((2,3) if 2 in slots and 3 in slots and 4 not in slots else (None,None))
+    if is_bg_variant and window_color_slot and window_alpha_slot:
         txt=script.read_text(encoding="utf-8")
         color_ready=str(blender_texture_path(slots[window_color_slot],WORK_DIR/"decoded_textures").resolve())
         alpha_ready=str(blender_texture_path(slots[window_alpha_slot],WORK_DIR/"decoded_textures").resolve())
