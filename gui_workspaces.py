@@ -699,6 +699,9 @@ class VehicleVariantsPage(QWidget):
             f"Reused unchanged cached results: {int(result.get('reused',0) or 0):,}",
             f"Recomputed this run: {int(result.get('recomputed',0) or 0):,}",
             f"Resolved to paintable BG families: {counts.get('resolved',0):,}",
+            f"  Strict confidence: {counts.get('resolved_strict',0):,}",
+            f"  Outline agreement: {counts.get('resolved_outline_agreement',0):,}",
+            f"  Corroborated evidence: {counts.get('resolved_corroborated',0):,}",
             f"Ambiguous / unresolved: {counts.get('ambiguous',0):,}",
             f"Special or non-paintable family matches: {counts.get('special',0):,}",
             f"Low-information / solid-color textures: {counts.get('low_information',0):,}",
@@ -715,7 +718,7 @@ class VehicleVariantsPage(QWidget):
         if result.get("report_csv"):
             lines += ["",f"CSV report: {result['report_csv']}",f"JSON report: {result.get('report_json','')}"]
         text.setPlainText("\n".join(lines));v.addWidget(text,1)
-        note=QLabel("Resolution removes each texture's background, then compares the remaining outline with decoded model UV-island boundaries and verified stock-template outlines. Ambiguous products remain unresolved and are excluded from rendering.")
+        note=QLabel("Resolution removes each texture's background and compares the remaining outline with decoded model UV-island boundaries and verified stock-template outlines. Strict matches are preserved; near-matches are accepted only when the primary outlines agree or multiple independent signals corroborate the same model.")
         note.setWordWrap(True);v.addWidget(note)
         close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
         self.status.setText(f"BG analysis complete • {counts.get('resolved',0):,} resolved • {counts.get('ambiguous',0):,} ambiguous • {counts.get('low_information',0):,} low-information • {counts.get('special',0):,} special/non-paintable")
