@@ -14,23 +14,22 @@ from there_texture_decoder import open_texture_image
 from there_model_decoder import decode_model
 
 
-CACHE_VERSION = 6
+CACHE_VERSION = 7
 CACHE_PATH = Path("cache/bg_family_resolution.json")
 REPORT_ROOT = Path("reports/bg_family_analysis")
 QUANTILES = (0.70, 0.80, 0.85)
 MIN_WINNER_SCORE = 0.18
 MIN_MARGIN = 0.035
 BACKGROUND_TOLERANCE = 38
-MODEL_UV_WEIGHT = 0.75
-UV_BOUNDARY_WEIGHT = 0.50
-TEMPLATE_ACTIVITY_WEIGHT = 0.25
-UV_PRECISION_WEIGHT = 0.20
+UV_OUTLINE_WEIGHT = 0.55
+TEMPLATE_OUTLINE_WEIGHT = 0.30
+UV_PRECISION_WEIGHT = 0.10
 OCCUPANCY_WEIGHT = 0.05
 MIN_BORDER_BACKGROUND_SHARE = 0.15
 MIN_FOREGROUND_FRACTION = 0.04
 MAX_FOREGROUND_FRACTION = 0.96
 MIN_TEXTURE_STDDEV = 5.0
-ANALYSIS_ALGORITHM = "model-body-uv-topology-v3"
+ANALYSIS_ALGORITHM = "background-removed-uv-outline-v1"
 
 
 def _slot(path):
@@ -139,13 +138,26 @@ def _foreground_occupancy(path, size=256, feature_size=64):
     foreground_fraction=foreground/float(size*size)
     usable=(border_share>=MIN_BORDER_BACKGROUND_SHARE and
             MIN_FOREGROUND_FRACTION<=foreground_fraction<=MAX_FOREGROUND_FRACTION)
-    small=fg.resize((feature_size,feature_size),Image.Resampling.BOX)
+
+    # Once the background is removed, the outside edge of the remaining
+    # artwork is a much cleaner approximation of the actual UV-island layout
+    # than RGB edge detection across the designer's artwork.
+    cleaned=fg.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(5))
+    dilated=cleaned.filter(ImageFilter.MaxFilter(5))
+    eroded=cleaned.filter(ImageFilter.MinFilter(5))
+    outline=ImageChops.subtract(dilated,eroded).filter(ImageFilter.MaxFilter(3))
+
+    small=cleaned.resize((feature_size,feature_size),Image.Resampling.BOX)
+    outline_small=outline.resize((feature_size,feature_size),Image.Resampling.BOX)
     mask=bytes(1 if p>=96 else 0 for p in small.getdata())
+    outline_mask=bytes(1 if p>=48 else 0 for p in outline_small.getdata())
     return {
         "mask":mask,
+        "outline_mask":outline_mask,
         "background_rgb":[round(v,2) for v in bg],
         "border_background_share":round(border_share,6),
         "foreground_fraction":round(foreground_fraction,6),
+        "outline_fraction":round(sum(outline_mask)/float(feature_size*feature_size),6),
         "stddev":round(stddev,6),
         "usable":usable,
         "low_information":stddev<MIN_TEXTURE_STDDEV,
@@ -263,9 +275,8 @@ def _analysis_fingerprint(anchor_fingerprint):
     settings={
         "algorithm":ANALYSIS_ALGORITHM,
         "background_tolerance":BACKGROUND_TOLERANCE,
-        "model_uv_weight":MODEL_UV_WEIGHT,
-        "uv_boundary_weight":UV_BOUNDARY_WEIGHT,
-        "template_activity_weight":TEMPLATE_ACTIVITY_WEIGHT,
+        "uv_outline_weight":UV_OUTLINE_WEIGHT,
+        "template_outline_weight":TEMPLATE_OUTLINE_WEIGHT,
         "uv_precision_weight":UV_PRECISION_WEIGHT,
         "occupancy_weight":OCCUPANCY_WEIGHT,
         "min_winner_score":MIN_WINNER_SCORE,
@@ -315,11 +326,11 @@ def _references(product_sets, models, rules=None):
 def analyze_bg_families(product_sets,models,rules=None):
     """Classify BG body textures against preview-verified stock template anchors.
 
-    Primary evidence comes from the actual model UV-island boundary topology
-    plus structural activity in the product texture. Filled UV occupancy is
-    deliberately secondary because custom artwork does not necessarily fill
-    every island. Products with weak or conflicting evidence remain unresolved
-    rather than being forced into a family.
+    The dominant background is removed first. The outline of the remaining
+    product artwork is then compared directly with the decoded model's body UV
+    island boundaries and with the stock template's background-removed outline.
+    Filled occupancy is only secondary evidence. Weak/conflicting matches remain
+    unresolved rather than being forced into a family.
     """
     anchors=_references(product_sets,models,rules)
     if len(anchors)<2:
@@ -327,7 +338,6 @@ def analyze_bg_families(product_sets,models,rules=None):
 
     usable_anchors=[]
     for anchor in anchors:
-        anchor["masks"]=_activity_masks(anchor["path"])
         anchor["occupancy"]=_foreground_occupancy(anchor["path"])
         try:
             anchor["model_uv"]=_model_body_uv_mask(anchor["model_path"],anchor["template"])
@@ -372,13 +382,12 @@ def analyze_bg_families(product_sets,models,rules=None):
 
         recomputed+=1
         candidate_occ=_foreground_occupancy(body)
-        candidate_activity=_activity_masks(body)
         if candidate_occ["low_information"]:
             assignments[str(pid)]={
                 "state":"unresolved","method":"BG low-information/solid-color texture","model":None,
                 "family_model":None,"template":None,"paintable":None,
                 "score":0.0,"margin":0.0,"votes":0,"scores":{},
-                "occupancy":{k:v for k,v in candidate_occ.items() if k!="mask"},
+                "occupancy":{k:v for k,v in candidate_occ.items() if k not in ("mask","outline_mask")},
                 "body_path":str(body),"body_size":body_stat.st_size,"body_mtime_ns":body_stat.st_mtime_ns,
             }
             counts["low_information"]+=1
@@ -387,40 +396,40 @@ def analyze_bg_families(product_sets,models,rules=None):
         occupancy_scores={}
         uv_scores={}
         uv_metrics={}
-        uv_boundary_scores={}
-        template_activity_scores={}
+        uv_outline_scores={}
+        template_outline_scores={}
         uv_precision_scores={}
         combined={}
         for anchor in anchors:
             model_name=anchor["model"]
             if candidate_occ["usable"] and anchor["occupancy"]["usable"]:
                 occupancy_scores[model_name]=_mask_iou(candidate_occ["mask"],anchor["occupancy"]["mask"])
+                template_outline_scores[model_name]=_mask_metrics(
+                    candidate_occ["outline_mask"],anchor["occupancy"]["outline_mask"]
+                )["dice"]
             else:
                 occupancy_scores[model_name]=None
+                template_outline_scores[model_name]=0.0
 
             fill_metrics=_mask_metrics(candidate_occ["mask"],anchor["model_uv"]["mask"]) if candidate_occ["usable"] else {"iou":0.0,"dice":0.0,"precision":0.0,"coverage":0.0}
             uv_metrics[model_name]=fill_metrics
             uv_scores[model_name]=fill_metrics["dice"]
             uv_precision_scores[model_name]=fill_metrics["precision"]
 
-            boundary_parts=[]
-            activity_parts=[]
-            for q in QUANTILES:
-                qkey=str(q)
-                boundary_metrics=_mask_metrics(candidate_activity[qkey],anchor["model_uv"]["boundary_mask"])
-                # Coverage asks whether the model's predicted UV seams are visible
-                # in the candidate; precision prevents a noisy full-canvas design
-                # from receiving a free pass.
-                boundary_parts.append(0.70*boundary_metrics["coverage"] + 0.30*boundary_metrics["precision"])
-                activity_parts.append(_mask_iou(candidate_activity[qkey],anchor["masks"][qkey]))
-            uv_boundary_scores[model_name]=sum(boundary_parts)/len(boundary_parts)
-            template_activity_scores[model_name]=sum(activity_parts)/len(activity_parts)
+            if candidate_occ["usable"]:
+                outline_metrics=_mask_metrics(candidate_occ["outline_mask"],anchor["model_uv"]["boundary_mask"])
+                # Favor model-boundary coverage slightly: a product outline should
+                # trace the UV islands, while small missing/painted-over sections are
+                # tolerated.
+                uv_outline_scores[model_name]=(0.60*outline_metrics["coverage"] + 0.40*outline_metrics["precision"])
+            else:
+                uv_outline_scores[model_name]=0.0
 
             occ=occupancy_scores[model_name]
             occ_score=occ if occ is not None else 0.0
             combined[model_name]=(
-                UV_BOUNDARY_WEIGHT*uv_boundary_scores[model_name]
-                + TEMPLATE_ACTIVITY_WEIGHT*template_activity_scores[model_name]
+                UV_OUTLINE_WEIGHT*uv_outline_scores[model_name]
+                + TEMPLATE_OUTLINE_WEIGHT*template_outline_scores[model_name]
                 + UV_PRECISION_WEIGHT*uv_precision_scores[model_name]
                 + OCCUPANCY_WEIGHT*occ_score
             )
@@ -432,7 +441,7 @@ def analyze_bg_families(product_sets,models,rules=None):
 
         # Independent evidence should agree before Inspector commits to a model.
         # This intentionally prefers "unresolved" over a confident-looking wrong render.
-        modalities=[uv_boundary_scores,template_activity_scores]
+        modalities=[uv_outline_scores,template_outline_scores]
         if candidate_occ["usable"]:
             modalities.extend([uv_precision_scores,{k:(v if v is not None else -1.0) for k,v in occupancy_scores.items()}])
         vote_count=sum(1 for scoreset in modalities if max(scoreset,key=scoreset.get)==winner)
@@ -444,7 +453,7 @@ def analyze_bg_families(product_sets,models,rules=None):
         elif not anchor["paintable"]:
             state="unresolved";method="BG special/non-paintable family";model=None;counts["special"]+=1
         else:
-            state="resolved";method="BG model UV family match";model=winner;counts["resolved"]+=1
+            state="resolved";method="BG background-removed UV outline match";model=winner;counts["resolved"]+=1
 
         assignments[str(pid)]={
             "state":state,"method":method,"model":model,
@@ -453,11 +462,11 @@ def analyze_bg_families(product_sets,models,rules=None):
             "scores":{k:round(v,6) for k,v in combined.items()},
             "uv_scores":{k:round(v,6) for k,v in uv_scores.items()},
             "uv_metrics":{k:{mk:round(mv,6) for mk,mv in vals.items()} for k,vals in uv_metrics.items()},
-            "uv_boundary_scores":{k:round(v,6) for k,v in uv_boundary_scores.items()},
-            "template_activity_scores":{k:round(v,6) for k,v in template_activity_scores.items()},
+            "uv_outline_scores":{k:round(v,6) for k,v in uv_outline_scores.items()},
+            "template_outline_scores":{k:round(v,6) for k,v in template_outline_scores.items()},
             "uv_precision_scores":{k:round(v,6) for k,v in uv_precision_scores.items()},
             "occupancy_scores":{k:(round(v,6) if v is not None else None) for k,v in occupancy_scores.items()},
-            "occupancy":{k:v for k,v in candidate_occ.items() if k!="mask"},
+            "occupancy":{k:v for k,v in candidate_occ.items() if k not in ("mask","outline_mask")},
             "body_path":str(body),"body_size":body.stat().st_size,"body_mtime_ns":body.stat().st_mtime_ns,
         }
 
@@ -468,14 +477,14 @@ def analyze_bg_families(product_sets,models,rules=None):
         "algorithm":ANALYSIS_ALGORITHM,
         "thresholds":{
             "quantiles":QUANTILES,"min_winner_score":MIN_WINNER_SCORE,"min_margin":MIN_MARGIN,
-            "background_tolerance":BACKGROUND_TOLERANCE,"model_uv_weight":MODEL_UV_WEIGHT,
-            "uv_boundary_weight":UV_BOUNDARY_WEIGHT,"template_activity_weight":TEMPLATE_ACTIVITY_WEIGHT,
+            "background_tolerance":BACKGROUND_TOLERANCE,
+            "uv_outline_weight":UV_OUTLINE_WEIGHT,"template_outline_weight":TEMPLATE_OUTLINE_WEIGHT,
             "uv_precision_weight":UV_PRECISION_WEIGHT,"occupancy_weight":OCCUPANCY_WEIGHT,
             "min_texture_stddev":MIN_TEXTURE_STDDEV,
         },
         "anchors":[{
             "model":a["model"],"model_path":a["model_path"],"template":a["template"],"paintable":a["paintable"],
-            "occupancy":{k:v for k,v in a["occupancy"].items() if k!="mask"},
+            "occupancy":{k:v for k,v in a["occupancy"].items() if k not in ("mask","outline_mask")},
             "model_uv":{"triangles":a["model_uv"]["triangles"],"area":a["model_uv"]["area"],"boundary_edges":a["model_uv"]["boundary_edges"],"boundary_area":a["model_uv"]["boundary_area"],"material_ids":a["model_uv"]["material_ids"]},
             "anchor_uv_metrics":{k:round(v,6) for k,v in a["anchor_uv_metrics"].items()},
         } for a in anchors],
@@ -497,9 +506,9 @@ def _write_report(payload):
     with open(cp,"w",newline="",encoding="utf-8-sig") as fh:
         w=csv.writer(fh)
         models=[a["model"] for a in payload.get("anchors",[])]
-        w.writerow(["pid","state","method","family_model","template","score","margin","votes","foreground_fraction","border_background_share","stddev",*[f"combined:{m}" for m in models],*[f"boundary:{m}" for m in models],*[f"activity:{m}" for m in models],*[f"uv_precision:{m}" for m in models],*[f"uv_dice:{m}" for m in models],*[f"occupancy:{m}" for m in models]])
+        w.writerow(["pid","state","method","family_model","template","score","margin","votes","foreground_fraction","outline_fraction","border_background_share","stddev",*[f"combined:{m}" for m in models],*[f"uv_outline:{m}" for m in models],*[f"template_outline:{m}" for m in models],*[f"uv_precision:{m}" for m in models],*[f"uv_dice:{m}" for m in models],*[f"occupancy:{m}" for m in models]])
         for pid,x in sorted(payload.get("assignments",{}).items(),key=lambda kv:int(kv[0]) if kv[0].isdigit() else kv[0]):
-            occ=x.get("occupancy") or {};w.writerow([pid,x.get("state"),x.get("method"),x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),occ.get("foreground_fraction",""),occ.get("border_background_share",""),occ.get("stddev",""),*[x.get("scores",{}).get(m,"") for m in models],*[x.get("uv_boundary_scores",{}).get(m,"") for m in models],*[x.get("template_activity_scores",{}).get(m,"") for m in models],*[x.get("uv_precision_scores",{}).get(m,"") for m in models],*[x.get("uv_scores",{}).get(m,"") for m in models],*[x.get("occupancy_scores",{}).get(m,"") for m in models]])
+            occ=x.get("occupancy") or {};w.writerow([pid,x.get("state"),x.get("method"),x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),occ.get("foreground_fraction",""),occ.get("outline_fraction",""),occ.get("border_background_share",""),occ.get("stddev",""),*[x.get("scores",{}).get(m,"") for m in models],*[x.get("uv_outline_scores",{}).get(m,"") for m in models],*[x.get("template_outline_scores",{}).get(m,"") for m in models],*[x.get("uv_precision_scores",{}).get(m,"") for m in models],*[x.get("uv_scores",{}).get(m,"") for m in models],*[x.get("occupancy_scores",{}).get(m,"") for m in models]])
     payload["report_csv"]=str(cp)
     payload["report_json"]=str(jp)
 
