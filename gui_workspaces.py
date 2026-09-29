@@ -12,7 +12,7 @@ from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thum
 from uv_intelligence import analyze_model_uv, compare_uv_fingerprints
 from model_forensics import analyze_model_rows
 from vehicle_resolver import resolve_products, resolution_summary, enrich_assignments, folder_configuration
-from bg_family_resolver import analyze_bg_families
+from bg_family_resolver import analyze_bg_families, load_bg_cache
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -482,9 +482,10 @@ class VehicleVariantsPage(QWidget):
         bg_analyze=QPushButton("Analyze BG Families");bg_analyze.clicked.connect(self.analyze_bg_families);self.bg_analyze_button=bg_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
-        self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Deterministic spread across the missing exact-PID population")
+        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Borderline m002","4-seater m005 candidates","All borderline"]);self.sample_mode.setToolTip("Resolved validation uses accepted products. Borderline modes are validation-only and deliberately render unresolved BG candidates without changing their classifier state.")
+        self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Number of products in the validation sample")
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
-        for w in (QLabel("Workers"),self.workers,config,uv_analyze,bg_analyze,resolve,QLabel("Sample"),self.sample_size,sample,self.render_button,self.cancel_button,self.failures_button,self.export_render_button,self.delete_all_button):action_row.addWidget(w)
+        for w in (QLabel("Workers"),self.workers,config,uv_analyze,bg_analyze,resolve,QLabel("Test"),self.sample_mode,QLabel("Sample"),self.sample_size,sample,self.render_button,self.cancel_button,self.failures_button,self.export_render_button,self.delete_all_button):action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
         self.compatibility=QLabel("Resolver status: verified PID/model matches and explicit official default-model rules.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
@@ -800,58 +801,120 @@ class VehicleVariantsPage(QWidget):
         populate();close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
         self.status.setText(f"Resolution preview • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • no guesses")
 
+    def _bg_diagnostic_sample(self,mode,target):
+        """Build validation-only samples from unresolved BG analysis candidates.
+
+        These assignments are intentionally NOT written back to the resolver cache as
+        resolved. They let visual review establish where the safe acceptance boundary
+        is, including whether m005 really identifies the four-seat family.
+        """
+        cache=load_bg_cache() or {}
+        diagnostics=cache.get("assignments") or {}
+        models=self.db.models_in_folder("bg",10000)
+        by_name={str(m["filename"]).lower():dict(m) for m in models}
+        paths_by_pid={str(pid):paths for pid,paths in self.sets}
+        candidates=[]
+        for pid,d in diagnostics.items():
+            if d.get("state")!="unresolved" or d.get("method")!="BG template family ambiguous":
+                continue
+            family=str(d.get("family_model") or "")
+            primary=bool(d.get("primary_agree"))
+            margin=float(d.get("margin") or 0.0)
+            score=float(d.get("score") or 0.0)
+            votes=int(d.get("votes") or 0)
+            if mode=="Borderline m002":
+                keep=(family.lower()=="m002bg.model" and primary and 0.010<=margin<0.015)
+            elif mode=="4-seater m005 candidates":
+                # Do not require the old margin here: the point of this test is to
+                # discover whether strong m005/4-seat evidence exists at all.
+                keep=(family.lower()=="m005bg.model" and primary)
+            else: # All borderline
+                keep=(primary and 0.010<=margin<0.015 and family.lower() in ("m002bg.model","m004bg.model","m005bg.model"))
+            if not keep:continue
+            model=by_name.get(family.lower());paths=paths_by_pid.get(str(pid))
+            if not model or not paths:continue
+            candidates.append({
+                "pid":str(pid),"textures":paths,"model":model,"state":"resolved","origin":"product",
+                "method":f"BG validation candidate • {family} • score {score:.4f} • margin {margin:.4f} • votes {votes}",
+                "_bg_score":score,"_bg_margin":margin,"_bg_votes":votes,"_bg_family":family
+            })
+        # Strongest evidence first, but spread the final sample through that ranked
+        # population so a 50-render review is not just 50 nearly identical margins.
+        candidates.sort(key=lambda x:(-x["_bg_margin"],-x["_bg_score"],int(x["pid"]) if x["pid"].isdigit() else x["pid"]))
+        if len(candidates)<=target:return enrich_assignments(candidates),len(candidates)
+        if target==1:selected=[candidates[0]]
+        else:
+            last=len(candidates)-1;idxs=[]
+            for i in range(target):
+                idx=int(round(i*last/(target-1)))
+                if idx not in idxs:idxs.append(idx)
+            selected=[candidates[i] for i in idxs]
+        return enrich_assignments(selected),len(candidates)
+
     def render_resolved_sample(self):
         if self.task and self.task.isRunning():
             QMessageBox.information(self,APP_NAME,"A render task is already running.");return
-        assignments=[x for x in self._resolved_assignments() if x["state"]=="resolved" and x.get("model")]
-        missing=[x for x in assignments if not cached_variant_thumbnail(x["model"]["path"],x["textures"])]
         target=int(self.sample_size.currentText())
-        if not missing:
-            self.status.setText("No missing resolved products are available for sampling.");return
+        mode=self.sample_mode.currentText() if hasattr(self,"sample_mode") else "Resolved validation"
 
-        def spread(items,count):
-            if count<=0 or not items:return []
-            if len(items)<=count:return list(items)
-            if count==1:return [items[len(items)//2]]
-            last=len(items)-1;idxs=[]
-            for i in range(count):
-                idx=int(round(i*last/(count-1)))
-                if idx not in idxs:idxs.append(idx)
-            return [items[i] for i in idxs]
-
-        exact=[x for x in missing if x["method"]=="exact PID model"]
-        defaults=[x for x in missing if x["method"]=="official default model"]
-        other=[x for x in missing if x["method"] not in ("exact PID model","official default model")]
-        if len(missing)<=target:
-            sample=list(missing)
-        elif defaults and exact:
-            default_slots=min(len(defaults),max(1,target//2))
-            sample=spread(defaults,default_slots)+spread(exact,target-default_slots)
-        elif defaults:
-            sample=spread(defaults,target)
-        elif exact:
-            sample=spread(exact,target)
+        if self.folder_name().lower()=="bg" and mode!="Resolved validation":
+            sample,population=self._bg_diagnostic_sample(mode,target)
+            if not sample:
+                self.status.setText(f"No unresolved BG products match the {mode} test population.");return
+            preview="\n".join(f"{x['pid']} → {x['model']['filename']} ({x['method']})" for x in sample[:12])
+            if len(sample)>12:preview+=f"\n… plus {len(sample)-12} more"
+            answer=QMessageBox.question(
+                self,"Render BG Diagnostic Sample",
+                f"{mode}\n\nRender {len(sample)} validation products from {population:,} matching unresolved candidates?\n\n"
+                f"{preview}\n\nThese are TEST assignments only. Rendering them does not mark the products resolved.",
+                QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+            if answer!=QMessageBox.Yes:return
+            scope="bg-"+mode.lower().replace(" ","-")
         else:
-            sample=spread(other,target)
-        sample=sorted(sample,key=lambda x:int(x["pid"]) if str(x["pid"]).isdigit() else str(x["pid"]))
+            assignments=[x for x in self._resolved_assignments() if x["state"]=="resolved" and x.get("model")]
+            missing=[x for x in assignments if not cached_variant_thumbnail(x["model"]["path"],x["textures"])]
+            if not missing:
+                self.status.setText("No missing resolved products are available for sampling.");return
+            def spread(items,count):
+                if count<=0 or not items:return []
+                if len(items)<=count:return list(items)
+                if count==1:return [items[len(items)//2]]
+                last=len(items)-1;idxs=[]
+                for i in range(count):
+                    idx=int(round(i*last/(count-1)))
+                    if idx not in idxs:idxs.append(idx)
+                return [items[i] for i in idxs]
+            exact=[x for x in missing if x["method"]=="exact PID model"]
+            defaults=[x for x in missing if x["method"]=="official default model"]
+            other=[x for x in missing if x["method"] not in ("exact PID model","official default model")]
+            if len(missing)<=target:sample=list(missing)
+            elif defaults and exact:
+                default_slots=min(len(defaults),max(1,target//2));sample=spread(defaults,default_slots)+spread(exact,target-default_slots)
+            elif defaults:sample=spread(defaults,target)
+            elif exact:sample=spread(exact,target)
+            else:sample=spread(other,target)
+            sample=sorted(sample,key=lambda x:int(x["pid"]) if str(x["pid"]).isdigit() else str(x["pid"]))
+            methods=resolution_summary(sample)["by_method"]
+            method_text=" • ".join(f"{k}: {v:,}" for k,v in sorted(methods.items()))
+            preview="\n".join(f"{x['pid']} → {x['model']['filename']} ({x['method']})" for x in sample[:12])
+            if len(sample)>12:preview+=f"\n… plus {len(sample)-12} more"
+            answer=QMessageBox.question(
+                self,"Render Resolved Sample",
+                f"Render a {len(sample)}-product validation sample from {len(missing):,} missing resolved products?\n\n"
+                f"{method_text}\n\n{preview}\n\nUnresolved products are excluded. The sampled PID list and binding results are exportable.",
+                QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+            if answer!=QMessageBox.Yes:return
+            scope="sample"
 
-        methods=resolution_summary(sample)["by_method"]
-        method_text=" • ".join(f"{k}: {v:,}" for k,v in sorted(methods.items()))
-        preview="\n".join(f"{x['pid']} → {x['model']['filename']} ({x['method']})" for x in sample[:12])
-        if len(sample)>12:preview+=f"\n… plus {len(sample)-12} more"
-        answer=QMessageBox.question(
-            self,"Render Resolved Sample",
-            f"Render a {len(sample)}-product validation sample from {len(missing):,} missing resolved products?\n\n"
-            f"{method_text}\n\n{preview}\n\nUnresolved products are excluded. The sampled PID list and binding results are exportable.",
-            QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
-        if answer!=QMessageBox.Yes:return
         self.progress.setRange(0,len(sample));self.progress.setValue(0);self.sample_button.setEnabled(False);self.cancel_button.setEnabled(True)
-        self.status.setText(f"Rendering {len(sample):,} resolved sample products…")
+        self.status.setText(f"Rendering {len(sample):,} products • {mode}…")
+        self._active_sample_scope=scope
         self.task=ResolvedVariantRenderTask(sample,int(self.workers.currentText()));self.task.progress.connect(self.on_progress);self.task.done.connect(self.resolved_sample_finished);self.task.start()
 
     def resolved_sample_finished(self,result):
         self.sample_button.setEnabled(True);self.cancel_button.setEnabled(False);self.task=None;self.last_failures=result.get("failures",[]);self.failures_button.setEnabled(bool(self.last_failures))
-        self.last_render_report={"folder":self.folder_name(),"scope":"sample","created":time.strftime("%Y-%m-%d %H:%M:%S"),"result":result};self.export_render_button.setEnabled(True)
+        scope=getattr(self,"_active_sample_scope","sample")
+        self.last_render_report={"folder":self.folder_name(),"scope":scope,"created":time.strftime("%Y-%m-%d %H:%M:%S"),"result":result};self.export_render_button.setEnabled(True)
         try:self.last_auto_report=write_render_report_files(self.last_render_report)
         except Exception:self.last_auto_report=None
         outputs=result.get("outputs",[])
