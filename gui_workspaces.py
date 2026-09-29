@@ -12,6 +12,7 @@ from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thum
 from uv_intelligence import analyze_model_uv, compare_uv_fingerprints
 from model_forensics import analyze_model_rows
 from vehicle_resolver import resolve_products, resolution_summary, enrich_assignments, folder_configuration
+from bg_family_resolver import analyze_bg_families
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -459,7 +460,7 @@ class ResolvedVariantRenderTask(QThread):
 
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
-        super().__init__();self.db=db;self.task=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        super().__init__();self.db=db;self.task=None;self.bg_task=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Product Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Resolve product models from client evidence and render verified product/model combinations without manual model guessing."))
         # Keep legacy model/template selectors internally for BG research, but the
         # normal workflow is now folder -> resolver -> render.
@@ -478,11 +479,12 @@ class VehicleVariantsPage(QWidget):
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[];self.last_render_report=None;self.last_auto_report=None
         self.export_render_button=QPushButton("Export Last Render");self.export_render_button.setEnabled(False);self.export_render_button.clicked.connect(self.export_last_render)
         uv_analyze=QPushButton("Analyze UV Families");uv_analyze.clicked.connect(self.analyze_uv_families);self.uv_analyze_button=uv_analyze
+        bg_analyze=QPushButton("Analyze BG Families");bg_analyze.clicked.connect(self.analyze_bg_families);self.bg_analyze_button=bg_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
         self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Deterministic spread across the missing exact-PID population")
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
-        for w in (QLabel("Workers"),self.workers,config,uv_analyze,resolve,QLabel("Sample"),self.sample_size,sample,self.render_button,self.cancel_button,self.failures_button,self.export_render_button,self.delete_all_button):action_row.addWidget(w)
+        for w in (QLabel("Workers"),self.workers,config,uv_analyze,bg_analyze,resolve,QLabel("Sample"),self.sample_size,sample,self.render_button,self.cancel_button,self.failures_button,self.export_render_button,self.delete_all_button):action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
         self.compatibility=QLabel("Resolver status: verified PID/model matches and explicit official default-model rules.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
@@ -516,7 +518,7 @@ class VehicleVariantsPage(QWidget):
             if previous:
                 idx=self.model_box.findText(previous)
                 if idx>=0:self.model_box.setCurrentIndex(idx)
-            self.model_box.blockSignals(False);self.discover();self.refresh()
+            self.model_box.blockSignals(False);self.discover();self.bg_analyze_button.setEnabled(folder.lower()=="bg");self.refresh()
             if self.raw_texture_count:
                 self.status.setText(f"Loaded {len(models):,} models • scanned {self.raw_texture_count:,} textures • discovered {len(self.sets):,} PID sets from {folder}")
             else:
@@ -635,6 +637,52 @@ class VehicleVariantsPage(QWidget):
     def _resolved_assignments(self):
         return enrich_assignments(self._basic_resolved_assignments())
 
+    def analyze_bg_families(self):
+        if self.folder_name().lower()!="bg":
+            QMessageBox.information(self,APP_NAME,"BG family analysis is only applicable to the bg resource folder.");return
+        if self.bg_task and self.bg_task.isRunning():
+            QMessageBox.information(self,APP_NAME,"BG family analysis is already running.");return
+        models=self.db.models_in_folder("bg",10000)
+        self.bg_analyze_button.setEnabled(False);self.progress.setRange(0,0)
+        self.status.setText(f"Analyzing {len(self.sets):,} BG product textures against verified model/template families…")
+        self.bg_task=Task(analyze_bg_families,self.sets,models)
+        self.bg_task.done.connect(self.bg_family_analysis_finished)
+        self.bg_task.failed.connect(self.bg_family_analysis_failed)
+        self.bg_task.start()
+
+    def bg_family_analysis_failed(self,message):
+        self.progress.setRange(0,100);self.progress.setValue(0);self.bg_analyze_button.setEnabled(True);self.bg_task=None
+        QMessageBox.critical(self,APP_NAME,f"BG family analysis failed:\n{message}")
+        self.status.setText("BG family analysis failed.")
+
+    def bg_family_analysis_finished(self,result):
+        self.progress.setRange(0,100);self.progress.setValue(100);self.bg_analyze_button.setEnabled(True);self.bg_task=None
+        if not result.get("ok"):
+            QMessageBox.warning(self,APP_NAME,result.get("message") or "BG family analysis did not produce a usable result.")
+            self.status.setText("BG family analysis did not produce a usable result.");return
+        counts=result.get("counts") or {};self.refresh()
+        d=QDialog(self);d.setWindowTitle("BG Family Analysis");d.resize(760,500);v=QVBoxLayout(d)
+        title=QLabel("BG family analysis complete");title.setObjectName("title");v.addWidget(title)
+        text=QPlainTextEdit();text.setReadOnly(True)
+        anchors=result.get("anchors") or []
+        lines=[
+            f"Products analyzed: {len(result.get('assignments') or {}):,}",
+            f"Resolved to paintable BG families: {counts.get('resolved',0):,}",
+            f"Ambiguous / unresolved: {counts.get('ambiguous',0):,}",
+            f"Special or non-paintable family matches: {counts.get('special',0):,}",
+            f"Missing body texture: {counts.get('missing_body',0):,}",
+            "",
+            "Verified reference families:"
+        ]
+        lines += [f"  {a.get('model')}  <-  {a.get('template')}  ({'paintable' if a.get('paintable') else 'special/non-paintable'})" for a in anchors]
+        if result.get("report_csv"):
+            lines += ["",f"CSV report: {result['report_csv']}",f"JSON report: {result.get('report_json','')}"]
+        text.setPlainText("\n".join(lines));v.addWidget(text,1)
+        note=QLabel("Only structurally separated products are resolved. Ambiguous products remain unresolved and are excluded from rendering.")
+        note.setWordWrap(True);v.addWidget(note)
+        close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
+        self.status.setText(f"BG analysis complete • {counts.get('resolved',0):,} resolved • {counts.get('ambiguous',0):,} ambiguous • {counts.get('special',0):,} special/non-paintable")
+
     def show_folder_configuration(self):
         folder=self.folder_name();models=self.db.models_in_folder(folder,10000);textures=self.db.textures_in_folder(folder,100000)
         cfg=folder_configuration(folder,models,textures)
@@ -660,7 +708,7 @@ class VehicleVariantsPage(QWidget):
         d=QDialog(self);d.setWindowTitle(f"Product Resolution Preview — {folder}");d.resize(1180,780);v=QVBoxLayout(d)
         head=QLabel();head.setObjectName("title");v.addWidget(head)
         note=QLabel("Resolution uses verified client evidence: exact numeric PID models and explicitly configured official default models. ACONF presence/raw strings are evidence only; unknown fields are not interpreted.");note.setWordWrap(True);v.addWidget(note)
-        controls=QHBoxLayout();flt=QComboBox();flt.addItems(["All","Resolved","Unresolved","Exact PID","Official default"]);export=QPushButton("Export Resolution Report");details=QPushButton("ACONF Details")
+        controls=QHBoxLayout();flt=QComboBox();flt.addItems(["All","Resolved","Unresolved","Exact PID","Official default","BG template family"]);export=QPushButton("Export Resolution Report");details=QPushButton("ACONF Details")
         controls.addWidget(QLabel("Filter"));controls.addWidget(flt);controls.addStretch();controls.addWidget(details);controls.addWidget(export);v.addLayout(controls)
         table=QTableWidget(0,7);table.setHorizontalHeaderLabels(["PID","State","Resolved model","Method","Textures","ACONF","Config strings"]);table.setSelectionBehavior(QAbstractItemView.SelectRows);table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         hh=table.horizontalHeader();hh.setSectionResizeMode(QHeaderView.Interactive)
@@ -669,7 +717,7 @@ class VehicleVariantsPage(QWidget):
         shown=[]
         def matches(x):
             mode=flt.currentText()
-            return mode=="All" or (mode=="Resolved" and x["state"]=="resolved") or (mode=="Unresolved" and x["state"]=="unresolved") or (mode=="Exact PID" and x["method"]=="exact PID model") or (mode=="Official default" and x["method"]=="official default model")
+            return mode=="All" or (mode=="Resolved" and x["state"]=="resolved") or (mode=="Unresolved" and x["state"]=="unresolved") or (mode=="Exact PID" and x["method"]=="exact PID model") or (mode=="Official default" and x["method"]=="official default model") or (mode=="BG template family" and x["method"]=="verified BG template family")
         def populate():
             nonlocal shown
             shown=[x for x in assignments if matches(x)];table.setRowCount(len(shown))
