@@ -168,7 +168,7 @@ def analyze_bg_families(product_sets,models,rules=None):
         elif not anchor["paintable"]:
             state="unresolved";method="BG special/non-paintable family";model=None;counts["special"]+=1
         else:
-            state="resolved";method="verified BG template family";model=winner;counts["resolved"]+=1
+            state="resolved";method="BG structural family match";model=winner;counts["resolved"]+=1
 
         assignments[str(pid)]={
             "state":state,"method":method,"model":model,
