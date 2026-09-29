@@ -471,8 +471,9 @@ class VehicleVariantsPage(QWidget):
         self.populate_folders()
         for w in (QLabel("Folder"),self.folder,load,QLabel("View"),self.view_filter):select_row.addWidget(w)
         select_row.setStretch(1,3);select_row.addStretch();b.addLayout(select_row)
+        # Keep the primary workflow compact. Research/maintenance commands live in
+        # an Advanced menu instead of consuming the entire Product Variants toolbar.
         action_row=QHBoxLayout();self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2")
-        self.engine=QComboBox();self.engine.addItems(["One-shot (safe)","Persistent (experimental)"]);self.engine.setCurrentIndex(0);self.engine.setMinimumWidth(165)
         self.render_button=QPushButton("Render All Resolved");self.render_button.setToolTip("Render every missing product with a verified model assignment in the selected folder; unresolved products are skipped");self.render_button.clicked.connect(self.render_all_resolved)
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete Resolved Renders");self.delete_all_button.clicked.connect(self.delete_all_resolved_variants)
@@ -482,11 +483,24 @@ class VehicleVariantsPage(QWidget):
         bg_analyze=QPushButton("Analyze BG Families");bg_analyze.clicked.connect(self.analyze_bg_families);self.bg_analyze_button=bg_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
-        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Near-tie m002 (0.005–0.010)","Extreme-tie m002 (<0.005)","4-seater m005 candidates","All near-ties (<0.010)"]);self.sample_mode.setToolTip("Resolved validation uses accepted products. Near-tie modes probe unresolved BG candidates below the current margin gate without changing their classifier state.")
+        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Near-tie m002 (0.005–0.010)","Extreme-tie m002 (<0.005)","4-seater m005 candidates","All near-ties (<0.010)"]);self.sample_mode.setToolTip("Validation modes probe family decisions without changing classifier state.")
         self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Number of products in the validation sample")
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
-        for w in (QLabel("Workers"),self.workers,config,uv_analyze,bg_analyze,resolve,QLabel("Test"),self.sample_mode,QLabel("Sample"),self.sample_size,sample,self.render_button,self.cancel_button,self.failures_button,self.export_render_button,self.delete_all_button):action_row.addWidget(w)
+
+        advanced=QToolButton();advanced.setText("Advanced");advanced.setPopupMode(QToolButton.InstantPopup)
+        advanced_menu=QMenu(advanced)
+        for label,button in (("Analyze UV Families",uv_analyze),("Folder Configuration",config),("Delete Resolved Renders",self.delete_all_button)):
+            act=advanced_menu.addAction(label);act.triggered.connect(button.click)
+        advanced.setMenu(advanced_menu)
+
+        for w in (bg_analyze,resolve,QLabel("Validation"),self.sample_mode,QLabel("Count"),self.sample_size,sample,self.render_button,self.cancel_button):
+            action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
+
+        utility_row=QHBoxLayout()
+        for w in (QLabel("Workers"),self.workers,self.failures_button,self.export_render_button,advanced):
+            utility_row.addWidget(w)
+        utility_row.addStretch();b.addLayout(utility_row)
         self.compatibility=QLabel("Resolver status: verified PID/model matches and explicit official default-model rules.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         pager=QHBoxLayout();self.variant_prev=QPushButton("Previous");self.variant_next=QPushButton("Next");self.variant_page_label=QLabel("Page 1 of 1")
@@ -701,7 +715,7 @@ class VehicleVariantsPage(QWidget):
             f"Recomputed this run: {int(result.get('recomputed',0) or 0):,}",
             f"Resolved to paintable BG families: {counts.get('resolved',0):,}",
             f"  Strict confidence: {counts.get('resolved_strict',0):,}",
-            f"  Outline agreement: {counts.get('resolved_outline_agreement',0):,}",
+            f"  Primary outline agreement: {counts.get('resolved_outline_agreement',0):,}",
             f"  Corroborated evidence: {counts.get('resolved_corroborated',0):,}",
             f"Ambiguous / unresolved: {counts.get('ambiguous',0):,}",
             f"Special or non-paintable family matches: {counts.get('special',0):,}",
@@ -719,7 +733,7 @@ class VehicleVariantsPage(QWidget):
         if result.get("report_csv"):
             lines += ["",f"CSV report: {result['report_csv']}",f"JSON report: {result.get('report_json','')}"]
         text.setPlainText("\n".join(lines));v.addWidget(text,1)
-        note=QLabel("Resolution removes each texture's background and compares the remaining outline with decoded model UV-island boundaries and verified stock-template outlines. The CSV report includes per-PID acceptance reasons, threshold gaps, confidence tier, votes, and every per-model component score so accepted and rejected products can be compared directly.")
+        note=QLabel("Resolution removes each texture's background and compares the remaining outline with decoded model UV-island boundaries and verified stock-template outlines. Primary UV + template agreement can now resolve close family ties without a minimum margin; sparse textures are held for review. Margin remains diagnostic. The CSV includes evidence confidence, sparse-evidence status, acceptance reasons, votes, and every per-model component score.")
         note.setWordWrap(True);v.addWidget(note)
         close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
         self.status.setText(f"BG analysis complete • {counts.get('resolved',0):,} resolved • {counts.get('ambiguous',0):,} ambiguous • {counts.get('low_information',0):,} low-information • {counts.get('special',0):,} special/non-paintable")
