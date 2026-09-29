@@ -711,8 +711,8 @@ class VehicleVariantsPage(QWidget):
             else:im.setText("Preview unavailable")
             cv.addWidget(im);lab=QLabel(f"PID {x['pid']}\n{x['model']['filename']}");lab.setAlignment(Qt.AlignCenter);lab.setWordWrap(True);cv.addWidget(lab)
             bs=x.get("binding_summary") or {};bind=QLabel(f"{x.get('binding_profile') or 'binding unknown'} • maps {bs.get('assigned_map_count','?')}/{bs.get('map_target_count','?')} assigned");bind.setAlignment(Qt.AlignCenter);bind.setWordWrap(True);bind.setStyleSheet("color:#8f98a3");cv.addWidget(bind)
-            if bs.get("unassigned_color_materials") or bs.get("unused_linked_textures"):
-                warn=QLabel(f"Binding review • unassigned: {len(bs.get('unassigned_color_materials',[]))} • unused textures: {len(bs.get('unused_linked_textures',[]))}");warn.setAlignment(Qt.AlignCenter);warn.setWordWrap(True);cv.addWidget(warn)
+            if bs.get("unassigned_maps") or bs.get("unused_linked_textures"):
+                warn=QLabel(f"Binding review • unassigned maps: {len(bs.get('unassigned_maps',[]))} • unused textures: {len(bs.get('unused_linked_textures',[]))}");warn.setAlignment(Qt.AlignCenter);warn.setWordWrap(True);cv.addWidget(warn)
             grid.addWidget(card,i//4,i%4)
         if not outputs:grid.addWidget(QLabel("No successful renders."),0,0)
         area.setWidget(host);v.addWidget(area,1)
