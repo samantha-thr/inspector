@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, json, math, subprocess, time
+import hashlib, json, math, subprocess, time, shutil
 from pathlib import Path
 from config import PROJECT_DIR
 from model_converter import find_blender
@@ -13,6 +13,45 @@ METADATA_DIR=PROJECT_DIR/"cache"/"model_thumbnail_meta"
 RENDER_VERSION=2
 VARIANT_RENDER_VERSION=9
 VARIANT_CACHE_DIR=PROJECT_DIR/"cache"/"model_variants"
+
+def _path_stats(root):
+    root=Path(root);files=bytes_total=0
+    if not root.exists():return {"files":0,"bytes":0}
+    try:
+        for p in root.rglob("*"):
+            if not p.is_file():continue
+            try:bytes_total+=p.stat().st_size;files+=1
+            except OSError:pass
+    except OSError:pass
+    return {"files":files,"bytes":bytes_total}
+
+def render_cache_stats():
+    return {
+        "model_thumbnails":_path_stats(CACHE_DIR),
+        "product_variants":_path_stats(VARIANT_CACHE_DIR),
+        "render_work":_path_stats(WORK_DIR),
+        "metadata":_path_stats(METADATA_DIR),
+    }
+
+def cleanup_render_work_cache(min_age_minutes=30):
+    """Remove regenerable render work files older than the safety window."""
+    removed=bytes_removed=0
+    if not WORK_DIR.exists():return {"files":0,"bytes":0}
+    cutoff=time.time()-max(0,float(min_age_minutes))*60.0
+    paths=sorted(WORK_DIR.rglob("*"),key=lambda p:len(p.parts),reverse=True)
+    for p in paths:
+        try:
+            if p.is_file() and p.stat().st_mtime<cutoff:
+                size=p.stat().st_size;p.unlink(missing_ok=True);removed+=1;bytes_removed+=size
+            elif p.is_dir() and not any(p.iterdir()):
+                p.rmdir()
+        except OSError:pass
+    return {"files":removed,"bytes":bytes_removed}
+
+def _cleanup_render_job(obj_path,script_path):
+    for p in (Path(script_path),Path(obj_path),Path(obj_path).with_suffix(".mtl")):
+        try:p.unlink(missing_ok=True)
+        except OSError:pass
 
 def thumbnail_key(model_path):
     p=Path(model_path)
@@ -138,7 +177,7 @@ def render_model_thumbnail(model_path,linked_textures=None,size=512,force=False)
 "+(proc.stderr or "")
     success=proc.returncode==0 and out.exists()
     if success:
-        write_render_metadata(model_path,out,size);clear_thumbnail_failure(model_path)
+        write_render_metadata(model_path,out,size);clear_thumbnail_failure(model_path);_cleanup_render_job(obj,script)
     else:log_thumbnail_failure(model_path,log[-4000:] or "Render failed",proc.returncode)
     return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:],"binding_profile":export_info.get("binding_profile"),"texture_bindings":export_info.get("texture_bindings",[])}
 
@@ -298,6 +337,7 @@ except Exception as e:
         time.sleep(.10)
     stdout,stderr=proc.communicate()
     log=(stdout or "")+"\n"+(stderr or "");success=proc.returncode==0 and out.exists()
+    if success:_cleanup_render_job(obj,script)
     return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:],"binding_profile":export_info.get("binding_profile"),"texture_bindings":export_info.get("texture_bindings",[])}
 
 
@@ -414,6 +454,7 @@ for line in sys.stdin:
             try:self.proc.wait(timeout=3)
             except Exception:self.proc.kill()
         self.proc=None
+        _cleanup_render_job(self.obj,self.script)
 
 def log_thumbnail_failure(model_path,message,returncode=None):
     FAILURE_LOG.parent.mkdir(parents=True,exist_ok=True)
