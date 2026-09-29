@@ -665,6 +665,10 @@ class VehicleVariantsPage(QWidget):
         title=QLabel("BG family analysis complete");title.setObjectName("title");v.addWidget(title)
         text=QPlainTextEdit();text.setReadOnly(True)
         anchors=result.get("anchors") or []
+        resolved_by_model={}
+        for x in (result.get("assignments") or {}).values():
+            if x.get("state")=="resolved" and x.get("family_model"):
+                name=x["family_model"];resolved_by_model[name]=resolved_by_model.get(name,0)+1
         lines=[
             f"Products analyzed: {len(result.get('assignments') or {}):,}",
             f"Resolved to paintable BG families: {counts.get('resolved',0):,}",
@@ -673,13 +677,18 @@ class VehicleVariantsPage(QWidget):
             f"Low-information / solid-color textures: {counts.get('low_information',0):,}",
             f"Missing body texture: {counts.get('missing_body',0):,}",
             "",
-            "Verified reference families:"
+            "Resolved by model:"
         ]
+        if resolved_by_model:
+            lines += [f"  {name}: {count:,}" for name,count in sorted(resolved_by_model.items())]
+        else:
+            lines += ["  none"]
+        lines += ["","Verified reference families:"]
         lines += [f"  {a.get('model')}  <-  {a.get('template')}  ({'paintable' if a.get('paintable') else 'special/non-paintable'})" for a in anchors]
         if result.get("report_csv"):
             lines += ["",f"CSV report: {result['report_csv']}",f"JSON report: {result.get('report_json','')}"]
         text.setPlainText("\n".join(lines));v.addWidget(text,1)
-        note=QLabel("Only structurally separated products are resolved. Ambiguous products remain unresolved and are excluded from rendering.")
+        note=QLabel("Resolution uses background-normalized product evidence plus the decoded model body UV coverage. Ambiguous products remain unresolved and are excluded from rendering.")
         note.setWordWrap(True);v.addWidget(note)
         close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
         self.status.setText(f"BG analysis complete • {counts.get('resolved',0):,} resolved • {counts.get('ambiguous',0):,} ambiguous • {counts.get('low_information',0):,} low-information • {counts.get('special',0):,} special/non-paintable")
