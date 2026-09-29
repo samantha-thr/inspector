@@ -14,14 +14,13 @@ from there_texture_decoder import open_texture_image
 from there_model_decoder import decode_model
 
 
-CACHE_VERSION = 5
+CACHE_VERSION = 6
 CACHE_PATH = Path("cache/bg_family_resolution.json")
 REPORT_ROOT = Path("reports/bg_family_analysis")
 QUANTILES = (0.70, 0.80, 0.85)
 MIN_WINNER_SCORE = 0.18
 MIN_MARGIN = 0.035
 BACKGROUND_TOLERANCE = 38
-OCCUPANCY_WEIGHT = 0.25
 MODEL_UV_WEIGHT = 0.75
 UV_BOUNDARY_WEIGHT = 0.50
 TEMPLATE_ACTIVITY_WEIGHT = 0.25
@@ -31,7 +30,7 @@ MIN_BORDER_BACKGROUND_SHARE = 0.15
 MIN_FOREGROUND_FRACTION = 0.04
 MAX_FOREGROUND_FRACTION = 0.96
 MIN_TEXTURE_STDDEV = 5.0
-ANALYSIS_ALGORITHM = "model-body-uv-topology-v2"
+ANALYSIS_ALGORITHM = "model-body-uv-topology-v3"
 
 
 def _slot(path):
@@ -316,11 +315,11 @@ def _references(product_sets, models, rules=None):
 def analyze_bg_families(product_sets,models,rules=None):
     """Classify BG body textures against preview-verified stock template anchors.
 
-    The primary evidence is UV-island occupancy after each image's dominant
-    background color is removed. Structural edge similarity remains secondary
-    evidence. Products with too little visual information, including genuinely
-    solid-color designs, remain unresolved rather than being forced into a
-    family.
+    Primary evidence comes from the actual model UV-island boundary topology
+    plus structural activity in the product texture. Filled UV occupancy is
+    deliberately secondary because custom artwork does not necessarily fill
+    every island. Products with weak or conflicting evidence remain unresolved
+    rather than being forced into a family.
     """
     anchors=_references(product_sets,models,rules)
     if len(anchors)<2:
@@ -430,9 +429,15 @@ def analyze_bg_families(product_sets,models,rules=None):
         winner,score80=ranked[0]
         second80=ranked[1][1] if len(ranked)>1 else 0.0
         margin=score80-second80
-        vote_count=1
+
+        # Independent evidence should agree before Inspector commits to a model.
+        # This intentionally prefers "unresolved" over a confident-looking wrong render.
+        modalities=[uv_boundary_scores,template_activity_scores]
+        if candidate_occ["usable"]:
+            modalities.extend([uv_precision_scores,{k:(v if v is not None else -1.0) for k,v in occupancy_scores.items()}])
+        vote_count=sum(1 for scoreset in modalities if max(scoreset,key=scoreset.get)==winner)
         anchor=next(a for a in anchors if a["model"]==winner)
-        clear=(candidate_occ["usable"] and score80>=MIN_WINNER_SCORE and margin>=MIN_MARGIN)
+        clear=(score80>=MIN_WINNER_SCORE and margin>=MIN_MARGIN and vote_count>=2)
 
         if not clear:
             state="unresolved";method="BG template family ambiguous";model=None;counts["ambiguous"]+=1
