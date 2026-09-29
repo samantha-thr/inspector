@@ -557,23 +557,116 @@ class VehicleVariantsPage(QWidget):
         elif self.model:
             self.compatibility.setText(f"Choose the reference template that belongs to {self.model['filename']}. Inspector will not infer template→model relationships.")
         self.status.setText(f"{len(self.sets):,} PID sets • {scored:,} analyzed • {len(compatible):,} match selected template • {unscored:,} could not be scored • {cached:,} rendered")
-    def show_resolution_preview(self):
+    def _resolved_assignments(self):
         folder=self.folder_name();models=self.db.models_in_folder(folder,10000)
-        assignments=resolve_products(folder,models,self.sets);summary=resolution_summary(assignments)
-        d=QDialog(self);d.setWindowTitle(f"Vehicle Resolution Preview — {folder}");d.resize(1050,720);v=QVBoxLayout(d)
-        head=QLabel(f"{len(assignments):,} product sets • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved");head.setObjectName("title");v.addWidget(head)
-        note=QLabel("This preview uses only authoritative rules: exact PID model matches and explicitly configured base models. Unresolved products are not guessed and cannot be bulk-rendered.");note.setWordWrap(True);v.addWidget(note)
-        table=QTableWidget(len(assignments),5);table.setHorizontalHeaderLabels(["PID","State","Resolved model","Method","Textures"]);table.setSelectionBehavior(QAbstractItemView.SelectRows);table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        for r,x in enumerate(assignments):
-            vals=(x["pid"],x["state"].upper(),x["model"]["filename"] if x["model"] else "—",x["method"],str(len(x["textures"])))
-            for c,val in enumerate(vals):table.setItem(r,c,QTableWidgetItem(str(val)))
-        hh=table.horizontalHeader();hh.setSectionResizeMode(QHeaderView.Interactive);table.setColumnWidth(0,150);table.setColumnWidth(1,120);table.setColumnWidth(2,220);table.setColumnWidth(3,330);table.setColumnWidth(4,90);table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);v.addWidget(table,1)
-        by=QPlainTextEdit();by.setReadOnly(True);by.setMaximumHeight(130)
+        return enrich_assignments(resolve_products(folder,models,self.sets))
+
+    def show_folder_configuration(self):
+        folder=self.folder_name();models=self.db.models_in_folder(folder,10000);textures=self.db.textures_in_folder(folder,100000)
+        cfg=folder_configuration(folder,models,textures)
+        d=QDialog(self);d.setWindowTitle(f"Folder Configuration — {folder}");d.resize(1120,760);v=QVBoxLayout(d)
+        head=QLabel(f"{folder} • client resource inventory");head.setObjectName("title");v.addWidget(head)
+        summary=QLabel(f"Product/PID models: {len(cfg['product_models']):,} • Official models: {len(cfg['official_models']):,} • Product textures: {len(cfg['product_textures']):,} • Official textures: {len(cfg['official_textures']):,} • PID .aconf: {len(cfg['product_aconf']):,} • Official .aconf: {len(cfg['official_aconf']):,}")
+        summary.setWordWrap(True);v.addWidget(summary)
+        tabs=QTabWidget();v.addWidget(tabs,1)
+        def make_table(rows,columns):
+            t=QTableWidget(len(rows),len(columns));t.setHorizontalHeaderLabels([x[0] for x in columns]);t.setEditTriggers(QAbstractItemView.NoEditTriggers);t.setSelectionBehavior(QAbstractItemView.SelectRows)
+            for r,row in enumerate(rows):
+                for c,(_,key) in enumerate(columns):t.setItem(r,c,QTableWidgetItem(str(row.get(key,""))))
+            h=t.horizontalHeader();h.setSectionResizeMode(QHeaderView.Interactive);h.setStretchLastSection(True);t.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);t.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            return t
+        tabs.addTab(make_table(cfg["product_models"],[("Product model","filename"),("Path","path")]),f"PID Models ({len(cfg['product_models']):,})")
+        tabs.addTab(make_table(cfg["official_models"],[("Official model","filename"),("Path","path")]),f"Official Models ({len(cfg['official_models']):,})")
+        tabs.addTab(make_table(cfg["official_textures"],[("Official/template texture","filename"),("Path","path")]),f"Official Textures ({len(cfg['official_textures']):,})")
+        tabs.addTab(make_table(cfg["aconf"],[("Config","filename"),("Origin","origin"),("PID","pid"),("Path","path")]),f"ACONF ({len(cfg['aconf']):,})")
+        close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
+
+    def show_resolution_preview(self):
+        folder=self.folder_name();assignments=self._resolved_assignments();summary=resolution_summary(assignments)
+        d=QDialog(self);d.setWindowTitle(f"Vehicle Resolution Preview — {folder}");d.resize(1180,780);v=QVBoxLayout(d)
+        head=QLabel();head.setObjectName("title");v.addWidget(head)
+        note=QLabel("Only authoritative resolution is shown: exact numeric PID models and explicitly configured base models. ACONF presence/raw strings are evidence only; Inspector does not infer meaning from unknown config fields.");note.setWordWrap(True);v.addWidget(note)
+        controls=QHBoxLayout();flt=QComboBox();flt.addItems(["All","Resolved","Unresolved","Exact PID","Configured fallback"]);export=QPushButton("Export Resolution Report");details=QPushButton("ACONF Details")
+        controls.addWidget(QLabel("Filter"));controls.addWidget(flt);controls.addStretch();controls.addWidget(details);controls.addWidget(export);v.addLayout(controls)
+        table=QTableWidget(0,7);table.setHorizontalHeaderLabels(["PID","State","Resolved model","Method","Textures","ACONF","Config strings"]);table.setSelectionBehavior(QAbstractItemView.SelectRows);table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        hh=table.horizontalHeader();hh.setSectionResizeMode(QHeaderView.Interactive)
+        for c,w in enumerate((140,115,220,230,85,90,360)):table.setColumnWidth(c,w)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);v.addWidget(table,1)
+        shown=[]
+        def matches(x):
+            mode=flt.currentText()
+            return mode=="All" or (mode=="Resolved" and x["state"]=="resolved") or (mode=="Unresolved" and x["state"]=="unresolved") or (mode=="Exact PID" and x["method"]=="exact PID model") or (mode=="Configured fallback" and x["method"]=="configured base model")
+        def populate():
+            nonlocal shown
+            shown=[x for x in assignments if matches(x)];table.setRowCount(len(shown))
+            for r,x in enumerate(shown):
+                ae=x.get("aconf") or {};strings=" | ".join(ae.get("strings",[])[:4])
+                vals=(x["pid"],x["state"].upper(),x["model"]["filename"] if x["model"] else "—",x["method"],str(len(x["textures"])),"YES" if ae.get("exists") else "—",strings)
+                for c,val in enumerate(vals):table.setItem(r,c,QTableWidgetItem(str(val)))
+            head.setText(f"{len(assignments):,} product sets • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • showing {len(shown):,}")
+        flt.currentIndexChanged.connect(populate)
+        def show_aconf():
+            r=table.currentRow()
+            if r<0 or r>=len(shown):return
+            x=shown[r];ae=x.get("aconf") or {}
+            if not ae.get("exists"):
+                QMessageBox.information(d,APP_NAME,f"PID {x['pid']} has no sibling {x['pid']}.aconf file.");return
+            dlg=QDialog(d);dlg.setWindowTitle(f"ACONF Evidence — {x['pid']}");dlg.resize(850,520);lay=QVBoxLayout(dlg)
+            lay.addWidget(QLabel(ae.get("path","")));raw=QPlainTextEdit();raw.setReadOnly(True);raw.setPlainText("\n".join(ae.get("strings",[])) or "(No printable strings found.)");lay.addWidget(raw,1)
+            bb=QDialogButtonBox(QDialogButtonBox.Close);bb.rejected.connect(dlg.reject);lay.addWidget(bb);dlg.exec()
+        details.clicked.connect(show_aconf)
+        def do_export():
+            path,_=QFileDialog.getSaveFileName(d,"Export Resolution Report",f"there-inspector-{folder}-resolution.csv","CSV (*.csv);;JSON (*.json)")
+            if not path:return
+            if path.lower().endswith(".json"):
+                serial=[]
+                for x in assignments:
+                    serial.append({"pid":x["pid"],"state":x["state"],"model":x["model"]["filename"] if x["model"] else None,"model_path":x["model"]["path"] if x["model"] else None,"method":x["method"],"textures":x["textures"],"aconf":x.get("aconf")})
+                Path(path).write_text(json.dumps({"folder":folder,"summary":summary,"assignments":serial},indent=2),encoding="utf-8")
+            else:
+                if not path.lower().endswith(".csv"):path += ".csv"
+                with open(path,"w",newline="",encoding="utf-8-sig") as fh:
+                    w=csv.writer(fh);w.writerow(["pid","state","resolved_model","model_path","method","texture_count","textures","aconf_exists","aconf_path","aconf_strings"])
+                    for x in assignments:
+                        ae=x.get("aconf") or {};w.writerow([x["pid"],x["state"],x["model"]["filename"] if x["model"] else "",x["model"]["path"] if x["model"] else "",x["method"],len(x["textures"])," | ".join(x["textures"]),bool(ae.get("exists")),ae.get("path") or ""," | ".join(ae.get("strings",[]))])
+            self.status.setText(f"Exported vehicle resolution report • {path}")
+        export.clicked.connect(do_export)
+        by=QPlainTextEdit();by.setReadOnly(True);by.setMaximumHeight(125)
         lines=["Resolved by model:"]+[f"  {k}: {n:,}" for k,n in sorted(summary["by_model"].items())]
         lines+=["","Resolution methods:"]+[f"  {k}: {n:,}" for k,n in sorted(summary["by_method"].items())]
         by.setPlainText("\n".join(lines));v.addWidget(by)
-        close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
+        populate();close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
         self.status.setText(f"Resolution preview • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • no guesses")
+
+    def render_resolved_sample(self):
+        if self.task and self.task.isRunning():
+            QMessageBox.information(self,APP_NAME,"A render task is already running.");return
+        assignments=[x for x in self._resolved_assignments() if x["state"]=="resolved" and x["method"]=="exact PID model"]
+        missing=[x for x in assignments if not cached_variant_thumbnail(x["model"]["path"],x["textures"])]
+        sample=missing[:10]
+        if not sample:
+            self.status.setText("No missing exact-PID resolved variants available for the 10-item test.");return
+        names="\n".join(f"{x['pid']} → {x['model']['filename']}" for x in sample)
+        answer=QMessageBox.question(self,"Render Verified Resolver Sample",f"Render {len(sample)} exact-PID products using their automatically resolved numeric models?\n\n{names}\n\nNo fallback or unresolved product will be included.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if answer!=QMessageBox.Yes:return
+        self.progress.setRange(0,len(sample));self.progress.setValue(0);self.sample_button.setEnabled(False);self.cancel_button.setEnabled(True)
+        self.status.setText(f"Auto-rendering {len(sample)} exact-PID resolved products with one-shot Blender…")
+        self.task=ResolvedVariantRenderTask(sample,int(self.workers.currentText()));self.task.progress.connect(self.on_progress);self.task.done.connect(self.resolved_sample_finished);self.task.start()
+
+    def resolved_sample_finished(self,result):
+        self.sample_button.setEnabled(True);self.cancel_button.setEnabled(False);self.task=None;self.last_failures=result.get("failures",[]);self.failures_button.setEnabled(bool(self.last_failures))
+        outputs=result.get("outputs",[])
+        d=QDialog(self);d.setWindowTitle("Resolved Render Sample");d.resize(1120,760);v=QVBoxLayout(d)
+        h=QLabel(f"{len(outputs):,} successful/cached • {result.get('failed',0):,} failed");h.setObjectName("title");v.addWidget(h)
+        area=QScrollArea();area.setWidgetResizable(True);host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft)
+        for i,x in enumerate(outputs):
+            card=QFrame();card.setObjectName("card");cv=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);p=QPixmap(str(x["output"]))
+            if not p.isNull():im.setPixmap(p.scaled(240,190,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+            else:im.setText("Preview unavailable")
+            cv.addWidget(im);lab=QLabel(f"PID {x['pid']}\n{x['model']['filename']}");lab.setAlignment(Qt.AlignCenter);lab.setWordWrap(True);cv.addWidget(lab);grid.addWidget(card,i//4,i%4)
+        if not outputs:grid.addWidget(QLabel("No successful renders."),0,0)
+        area.setWidget(host);v.addWidget(area,1);bb=QDialogButtonBox(QDialogButtonBox.Close);bb.rejected.connect(d.reject);v.addWidget(bb);d.exec()
+        self.status.setText(f"Resolved sample complete • rendered {result.get('rendered',0):,} • cached {result.get('cached',0):,} • failed {result.get('failed',0):,}")
 
     def analyze_uv_families(self):
         """Decode every model in the selected folder and group exact LOD0 UV layouts."""
