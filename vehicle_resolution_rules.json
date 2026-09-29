@@ -1,0 +1,9 @@
+{
+  "_comment": "Vehicle resolver rules are explicit evidence, not classifier guesses. Add a folder base_model only after it is verified from the There client. Exact PID models resolve automatically.",
+  "bg": {
+    "nonpaintable_models": [
+      "m001bg.model",
+      "m515bf.model"
+    ]
+  }
+}
