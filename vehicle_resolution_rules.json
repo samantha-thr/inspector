@@ -4,6 +4,42 @@
     "nonpaintable_models": [
       "m001bg.model",
       "m515bf.model"
+    ],
+    "verified_template_models": {
+      "m001bg.model": {
+        "body": "t001bg_singlebluefast.jpg",
+        "window": "t004bg_window.jpg",
+        "opacity": "t011bg_windowtrans.jpg",
+        "paintable": false
+      },
+      "m002bg.model": {
+        "body": "t005bg_2personpurple.jpg",
+        "window": "t004bg_window.jpg",
+        "opacity": "t011bg_windowtrans.jpg",
+        "paintable": true
+      },
+      "m004bg.model": {
+        "body": "t035bg_rustybronco.jpg",
+        "window": "t004bg_window.jpg",
+        "opacity": "t011bg_windowtrans.jpg",
+        "paintable": true
+      },
+      "m005bg.model": {
+        "body": "t039bg_4personpurple.jpg",
+        "window": "t004bg_window.jpg",
+        "opacity": "t011bg_windowtrans.jpg",
+        "paintable": true
+      },
+      "m515bf.model": {
+        "body": "t515bf_jack.png",
+        "window": "t516bf_window.png",
+        "opacity": "t517bf_windowtrans.jpg",
+        "paintable": false
+      }
+    },
+    "special_models": [
+      "m004mt.model",
+      "m555vw.model"
     ]
   },
   "hbk": {
