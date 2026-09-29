@@ -413,7 +413,7 @@ class ResolvedVariantRenderTask(QThread):
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
         super().__init__();self.db=db;self.task=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
-        h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Render complete PID texture sets on a shared vehicle model for true 3D design previews."))
+        h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Resolve product models from client evidence, inspect folder configuration, and build true 3D variant previews."))
         # Two-row responsive toolbar: selection on top, render actions below.
         select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(210);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder");self.model_box=QComboBox();self.model_box.setMinimumWidth(180);self.model_box.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.template_box=QComboBox();self.template_box.setMinimumWidth(220);self.template_box.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.template_box.setToolTip("Reference template used to classify PID texture layouts");load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
         self.populate_folders()
@@ -425,7 +425,9 @@ class VehicleVariantsPage(QWidget):
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
         uv_analyze=QPushButton("Analyze UV Families");uv_analyze.clicked.connect(self.analyze_uv_families);self.uv_analyze_button=uv_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
-        for w in (QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,uv_analyze,resolve,render,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
+        config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
+        sample=QPushButton("Render 10 Resolved");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
+        for w in (QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,config,uv_analyze,resolve,sample,render,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
         self.compatibility=QLabel("Select the correct model/template before rendering.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
