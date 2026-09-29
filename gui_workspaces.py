@@ -460,14 +460,14 @@ class ResolvedVariantRenderTask(QThread):
 
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
-        super().__init__();self.db=db;self.task=None;self.bg_task=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        super().__init__();self.db=db;self.task=None;self.bg_task=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;self.variant_page=0;self.variant_page_size=100;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Product Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Resolve product models from client evidence and render verified product/model combinations without manual model guessing."))
         # Keep legacy model/template selectors internally for BG research, but the
         # normal workflow is now folder -> resolver -> render.
         select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(260);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder")
         self.model_box=QComboBox();self.template_box=QComboBox()
         load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
-        self.view_filter=QComboBox();self.view_filter.addItems(["Rendered","Missing resolved","Unresolved","All resolved"]);self.view_filter.currentIndexChanged.connect(self.refresh)
+        self.view_filter=QComboBox();self.view_filter.addItems(["Rendered","Missing resolved","Unresolved","All resolved"]);self.view_filter.currentIndexChanged.connect(self.reset_variant_page)
         self.populate_folders()
         for w in (QLabel("Folder"),self.folder,load,QLabel("View"),self.view_filter):select_row.addWidget(w)
         select_row.setStretch(1,3);select_row.addStretch();b.addLayout(select_row)
@@ -488,7 +488,16 @@ class VehicleVariantsPage(QWidget):
         action_row.addStretch();b.addLayout(action_row)
         self.compatibility=QLabel("Resolver status: verified PID/model matches and explicit official default-model rules.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
+        pager=QHBoxLayout();self.variant_prev=QPushButton("Previous");self.variant_next=QPushButton("Next");self.variant_page_label=QLabel("Page 1 of 1")
+        self.variant_prev.clicked.connect(lambda:self.change_variant_page(-1));self.variant_next.clicked.connect(lambda:self.change_variant_page(1))
+        pager.addWidget(self.variant_prev);pager.addWidget(self.variant_page_label);pager.addWidget(self.variant_next);pager.addStretch();b.addLayout(pager)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.template_box.currentIndexChanged.connect(self.refresh);self.load_folder()
+    def reset_variant_page(self,*_):
+        self.variant_page=0;self.refresh()
+
+    def change_variant_page(self,delta):
+        self.variant_page=max(0,self.variant_page+int(delta));self.refresh()
+
     def folder_name(self):
         return (self.folder.currentData() or self.folder.currentText()).strip()
 
@@ -592,7 +601,10 @@ class VehicleVariantsPage(QWidget):
             if not parsed:continue
             pid,slot=parsed;groups.setdefault(pid,{})[slot]=t["path"]
         self.sets=[(pid,[slots[k] for k in sorted(slots)]) for pid,slots in sorted(groups.items(),key=lambda x:int(x[0]))]
-        self.classify_templates(textures)
+        # Legacy artwork/template classification is intentionally not run during normal folder loads.
+        # Resolver-driven Product Variants no longer depends on it, and decoding every body texture here
+        # made large folders such as BG unnecessarily expensive to open.
+        self.template_refs=[];self.template_assignments={}
 
     def current_model(self):
         d=self.model_box.currentData();return d if d else None
@@ -604,8 +616,7 @@ class VehicleVariantsPage(QWidget):
     def refresh(self):
         assignments=self._basic_resolved_assignments();summary=resolution_summary(assignments)
         mode=self.view_filter.currentText() if hasattr(self,"view_filter") else "Rendered"
-        host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0;cached_count=0;missing_count=0
-        filtered=[]
+        cached_count=0;missing_count=0;filtered=[]
         for x in assignments:
             cached=None
             if x["state"]=="resolved" and x["model"]:
@@ -614,7 +625,13 @@ class VehicleVariantsPage(QWidget):
                 else:missing_count+=1
             include=(mode=="Rendered" and cached) or (mode=="Missing resolved" and x["state"]=="resolved" and not cached) or (mode=="Unresolved" and x["state"]=="unresolved") or (mode=="All resolved" and x["state"]=="resolved")
             if include:filtered.append((x,cached))
-        for x,cached in filtered[:500]:
+
+        pages=max(1,(len(filtered)+self.variant_page_size-1)//self.variant_page_size)
+        if self.variant_page>=pages:self.variant_page=max(0,pages-1)
+        lo=self.variant_page*self.variant_page_size;hi=min(lo+self.variant_page_size,len(filtered))
+        page=filtered[lo:hi]
+        host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0
+        for x,cached in page:
             card=QFrame();card.setObjectName("card");card.setMinimumWidth(225);v=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);im.setMinimumSize(210,170)
             if cached:
                 pix=QPixmap(str(cached));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation))
@@ -629,10 +646,11 @@ class VehicleVariantsPage(QWidget):
                 delete=QPushButton("Delete Render");delete.clicked.connect(lambda _,xx=x:self.delete_resolved_variant(xx));buttons.addWidget(delete)
             v.addLayout(buttons);grid.addWidget(card,shown//4,shown%4);shown+=1
         if not shown:grid.addWidget(QLabel("No products match this view."),0,0)
-        elif len(filtered)>500:grid.addWidget(QLabel(f"Showing first 500 of {len(filtered):,}; use the view filter to narrow the list."),(shown//4)+1,0,1,4)
-        self.area.setWidget(host)
+        self.area.setWidget(host);self.area.verticalScrollBar().setValue(0)
+        self.variant_prev.setEnabled(self.variant_page>0);self.variant_next.setEnabled(hi<len(filtered))
+        self.variant_page_label.setText(f"Page {self.variant_page+1:,} of {pages:,} • showing {lo+1 if filtered else 0:,}–{hi:,} of {len(filtered):,}")
         self.compatibility.setText(f"Resolver • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • verified model assignments only")
-        self.status.setText(f"{len(self.sets):,} PID sets • {cached_count:,} rendered • {missing_count:,} resolved/missing • {summary['unresolved']:,} unresolved • showing {min(len(filtered),500):,}")
+        self.status.setText(f"{len(self.sets):,} PID sets • {cached_count:,} rendered • {missing_count:,} resolved/missing • {summary['unresolved']:,} unresolved • showing {len(page):,}")
 
     def _resolved_assignments(self):
         return enrich_assignments(self._basic_resolved_assignments())
