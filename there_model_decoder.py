@@ -933,7 +933,9 @@ def export_obj(
         "triangles": model.triangle_count,
         "collision": model.collision is not None,
         "materials": len(model.materials),
-        "material_details": [{"index":m.index,"name":m.name,"bool_mask":m.bool_mask,"bool_values":m.bool_values,"map_mask":m.map_mask,"map_bits":[b for b in range(7) if m.map_mask & (1<<b)],"texture_maps":dict(m.texture_maps)} for m in model.materials],\n        "binding_profile": "bg-window-opacity" if is_bg_variant else "model-driven",\n        "texture_bindings": binding_details,
+        "material_details": [{"index":m.index,"name":m.name,"bool_mask":m.bool_mask,"bool_values":m.bool_values,"map_mask":m.map_mask,"map_bits":[b for b in range(7) if m.map_mask & (1<<b)],"texture_maps":dict(m.texture_maps)} for m in model.materials],
+        "binding_profile": "bg-window-opacity" if is_bg_variant else "model-driven",
+        "texture_bindings": binding_details,
         "nodes": len(model.nodes),
     }
 
