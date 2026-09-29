@@ -741,6 +741,8 @@ class VehicleVariantsPage(QWidget):
     def resolved_sample_finished(self,result):
         self.sample_button.setEnabled(True);self.cancel_button.setEnabled(False);self.task=None;self.last_failures=result.get("failures",[]);self.failures_button.setEnabled(bool(self.last_failures))
         self.last_render_report={"folder":self.folder_name(),"scope":"sample","created":time.strftime("%Y-%m-%d %H:%M:%S"),"result":result};self.export_render_button.setEnabled(True)
+        try:self.last_auto_report=write_render_report_files(self.last_render_report)
+        except Exception:self.last_auto_report=None
         outputs=result.get("outputs",[])
         d=QDialog(self);d.setWindowTitle("Resolved Render Sample");d.resize(1120,760);v=QVBoxLayout(d)
         h=QLabel(f"{len(outputs):,} successful/cached • {result.get('failed',0):,} failed");h.setObjectName("title");v.addWidget(h)
@@ -757,7 +759,8 @@ class VehicleVariantsPage(QWidget):
         if not outputs:grid.addWidget(QLabel("No successful renders."),0,0)
         area.setWidget(host);v.addWidget(area,1)
         buttons=QHBoxLayout();export=QPushButton("Export Results");export.clicked.connect(lambda:self.export_last_render(d));buttons.addWidget(export);buttons.addStretch();bb=QDialogButtonBox(QDialogButtonBox.Close);bb.rejected.connect(d.reject);buttons.addWidget(bb);v.addLayout(buttons);d.exec()
-        self.status.setText(f"Resolved sample complete • rendered {result.get('rendered',0):,} • cached {result.get('cached',0):,} • failed {result.get('failed',0):,}")
+        report_note=f" • auto-report: {self.last_auto_report['csv']}" if self.last_auto_report else ""
+        self.status.setText(f"Resolved sample complete • rendered {result.get('rendered',0):,} • failed {result.get('failed',0):,} • binding complete {result.get('binding_complete',0):,} • review {result.get('binding_review',0):,}{report_note}")
 
     def export_last_render(self,parent=None):
         report=self.last_render_report
@@ -801,27 +804,56 @@ class VehicleVariantsPage(QWidget):
     def render_all_resolved(self):
         if self.task and self.task.isRunning():
             QMessageBox.information(self,APP_NAME,"A render task is already running.");return
-        assignments=[x for x in self._basic_resolved_assignments() if x["state"]=="resolved" and x.get("model")]
+        all_assignments=self._basic_resolved_assignments()
+        assignments=[x for x in all_assignments if x["state"]=="resolved" and x.get("model")]
+        unresolved=sum(1 for x in all_assignments if x["state"]=="unresolved")
+        cached=[x for x in assignments if cached_variant_thumbnail(x["model"]["path"],x["textures"])]
         missing=[x for x in assignments if not cached_variant_thumbnail(x["model"]["path"],x["textures"])]
         if not missing:
-            self.status.setText("All currently resolved product variants already have cached renders.");return
+            self.status.setText(f"Buffet already eaten • {len(cached):,} resolved products cached • {unresolved:,} unresolved skipped.");return
         methods=resolution_summary(missing)["by_method"]
-        detail="\n".join(f"{k}: {v:,}" for k,v in sorted(methods.items()))
-        answer=QMessageBox.question(self,"Render Resolved Missing",f"Render {len(missing):,} resolved products in {self.folder_name()} using the model selected by the resolver?\n\n{detail}\n\nUnresolved products are excluded. This uses one-shot Blender because resolved products may use different models.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        detail="\n".join(f"  {k}: {v:,}" for k,v in sorted(methods.items()))
+        msg=(f"Feed Inspector {len(missing):,} missing resolved products from {self.folder_name()}?\n\n"
+             f"Resolved total: {len(assignments):,}\nAlready rendered: {len(cached):,}\nTo render now: {len(missing):,}\n"
+             f"Unresolved and skipped: {unresolved:,}\n\nResolution evidence:\n{detail}\n\n"
+             "Inspector will continue past individual failures, keep successful renders, and automatically save CSV + JSON run reports.")
+        answer=QMessageBox.question(self,"Feed Inspector — Full Resolved Folder",msg,QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer!=QMessageBox.Yes:return
         self.progress.setRange(0,len(missing));self.progress.setValue(0);self.render_button.setEnabled(False);self.sample_button.setEnabled(False);self.cancel_button.setEnabled(True)
-        self.status.setText(f"Rendering {len(missing):,} resolver-approved product variants…")
+        self.status.setText(f"Inspector is eating {len(missing):,} resolver-approved products • {unresolved:,} unresolved safely skipped…")
         self.task=ResolvedVariantRenderTask(missing,int(self.workers.currentText()));self.task.progress.connect(self.on_progress);self.task.done.connect(self.resolved_full_finished);self.task.start()
 
     def resolved_full_finished(self,result):
         self.render_button.setEnabled(True);self.sample_button.setEnabled(True);self.cancel_button.setEnabled(False);self.task=None
         self.last_failures=result.get("failures",[]);self.failures_button.setEnabled(bool(self.last_failures))
         self.last_render_report={"folder":self.folder_name(),"scope":"resolved-missing","created":time.strftime("%Y-%m-%d %H:%M:%S"),"result":result};self.export_render_button.setEnabled(True)
+        try:self.last_auto_report=write_render_report_files(self.last_render_report)
+        except Exception:self.last_auto_report=None
         self.refresh()
-        if result.get("cancelled"):
-            self.status.setText(f"Stopped • completed {result.get('completed',0):,} • rendered {result.get('rendered',0):,} • failed {result.get('failed',0):,} • completed results are exportable")
-        else:
-            self.progress.setValue(self.progress.maximum());self.status.setText(f"Resolver render complete • rendered {result.get('rendered',0):,} • cached {result.get('cached',0):,} • failed {result.get('failed',0):,} • results ready to export")
+        if not result.get("cancelled"):self.progress.setValue(self.progress.maximum())
+        status=("Stopped" if result.get("cancelled") else "Buffet complete")
+        report_note=f" • report {self.last_auto_report['csv']}" if self.last_auto_report else ""
+        self.status.setText(f"{status} • completed {result.get('completed',0):,}/{result.get('total',0):,} • rendered {result.get('rendered',0):,} • failed {result.get('failed',0):,} • binding complete {result.get('binding_complete',0):,} • review {result.get('binding_review',0):,}{report_note}")
+
+        d=QDialog(self);d.setWindowTitle("Inspector Buffet Results");d.resize(760,480);v=QVBoxLayout(d)
+        title=QLabel("Inspector finished the folder" if not result.get("cancelled") else "Inspector stopped cleanly");title.setObjectName("title");v.addWidget(title)
+        summary=QPlainTextEdit();summary.setReadOnly(True)
+        lines=[
+            f"Folder: {self.folder_name()}",
+            f"Completed: {result.get('completed',0):,} / {result.get('total',0):,}",
+            f"Rendered: {result.get('rendered',0):,}",
+            f"Failed: {result.get('failed',0):,}",
+            f"Unsupported model decoder: {result.get('unsupported',0):,}",
+            f"Binding complete: {result.get('binding_complete',0):,}",
+            f"Binding review: {result.get('binding_review',0):,}",
+        ]
+        if self.last_auto_report:
+            lines += ["",f"CSV report: {self.last_auto_report['csv']}",f"JSON report: {self.last_auto_report['json']}"]
+        summary.setPlainText("\n".join(lines));v.addWidget(summary,1)
+        buttons=QHBoxLayout();export=QPushButton("Export Copy…");export.clicked.connect(lambda:self.export_last_render(d));buttons.addWidget(export)
+        if self.last_failures:
+            failures=QPushButton(f"Failures ({len(self.last_failures):,})");failures.clicked.connect(self.show_failures);buttons.addWidget(failures)
+        buttons.addStretch();close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);buttons.addWidget(close);v.addLayout(buttons);d.exec()
 
     def analyze_uv_families(self):
         """Decode every model in the selected folder and group exact LOD0 UV layouts."""
