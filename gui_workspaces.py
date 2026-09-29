@@ -545,27 +545,46 @@ class VehicleVariantsPage(QWidget):
 
     def current_model(self):
         d=self.model_box.currentData();return d if d else None
-    def refresh(self):
-        self.model=self.current_model();host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0;cached=0
-        if self.model:
-            for pid,paths in self.compatible_sets(self.model):
-                p=cached_variant_thumbnail(self.model["path"],paths)
-                if not p:continue
-                cached+=1;card=QFrame();card.setObjectName("card");v=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);pix=QPixmap(str(p));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation));v.addWidget(im)
-                n=QLabel(f"PID {pid} • {len(paths)} texture(s)");n.setAlignment(Qt.AlignCenter);v.addWidget(n)
-                buttons=QHBoxLayout();tex=QPushButton("Open Texture Set");tex.clicked.connect(lambda _,pp=paths:self.open_textures(pp));delete=QPushButton("Delete Render");delete.clicked.connect(lambda _,pp=paths:self.delete_variant(pp));buttons.addWidget(tex);buttons.addWidget(delete);v.addLayout(buttons);grid.addWidget(card,shown//4,shown%4);shown+=1
-        if not shown:grid.addWidget(QLabel("Automatic rendering is locked while template classification is being validated."),0,0)
-        self.area.setWidget(host)
-        compatible=self.compatible_sets(self.model);scored=len(self.template_assignments);unscored=len(self.sets)-scored
-        template_name=self.template_box.currentText() if self.template_box.currentData() else None
-        if self.model and template_name:
-            self.compatibility.setText(f"Template Analysis (experimental) • {len(compatible):,} candidates score ≥78% vs {template_name} • NOT validated for {self.model['filename']}")
-        elif self.model:
-            self.compatibility.setText(f"Choose the reference template that belongs to {self.model['filename']}. Inspector will not infer template→model relationships.")
-        self.status.setText(f"{len(self.sets):,} PID sets • {scored:,} analyzed • {len(compatible):,} match selected template • {unscored:,} could not be scored • {cached:,} rendered")
-    def _resolved_assignments(self):
+
+    def _basic_resolved_assignments(self):
         folder=self.folder_name();models=self.db.models_in_folder(folder,10000)
-        return enrich_assignments(resolve_products(folder,models,self.sets))
+        return resolve_products(folder,models,self.sets)
+
+    def refresh(self):
+        assignments=self._basic_resolved_assignments();summary=resolution_summary(assignments)
+        mode=self.view_filter.currentText() if hasattr(self,"view_filter") else "Rendered"
+        host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0;cached_count=0;missing_count=0
+        filtered=[]
+        for x in assignments:
+            cached=None
+            if x["state"]=="resolved" and x["model"]:
+                cached=cached_variant_thumbnail(x["model"]["path"],x["textures"])
+                if cached:cached_count+=1
+                else:missing_count+=1
+            include=(mode=="Rendered" and cached) or (mode=="Missing resolved" and x["state"]=="resolved" and not cached) or (mode=="Unresolved" and x["state"]=="unresolved") or (mode=="All resolved" and x["state"]=="resolved")
+            if include:filtered.append((x,cached))
+        for x,cached in filtered[:500]:
+            card=QFrame();card.setObjectName("card");card.setMinimumWidth(225);v=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);im.setMinimumSize(210,170)
+            if cached:
+                pix=QPixmap(str(cached));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+            else:
+                im.setText("Unresolved" if x["state"]=="unresolved" else "Missing render")
+            v.addWidget(im)
+            model_name=x["model"]["filename"] if x["model"] else "No model resolved"
+            n=QLabel(f"PID {x['pid']}\n{model_name}");n.setAlignment(Qt.AlignCenter);n.setWordWrap(True);v.addWidget(n)
+            method=QLabel(x["method"]);method.setAlignment(Qt.AlignCenter);method.setStyleSheet("color:#8f98a3");v.addWidget(method)
+            buttons=QHBoxLayout();tex=QPushButton("Textures");tex.clicked.connect(lambda _,pp=x["textures"]:self.open_textures(pp));buttons.addWidget(tex)
+            if cached:
+                delete=QPushButton("Delete Render");delete.clicked.connect(lambda _,xx=x:self.delete_resolved_variant(xx));buttons.addWidget(delete)
+            v.addLayout(buttons);grid.addWidget(card,shown//4,shown%4);shown+=1
+        if not shown:grid.addWidget(QLabel("No products match this view."),0,0)
+        elif len(filtered)>500:grid.addWidget(QLabel(f"Showing first 500 of {len(filtered):,}; use the view filter to narrow the list."),(shown//4)+1,0,1,4)
+        self.area.setWidget(host)
+        self.compatibility.setText(f"Resolver • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • exact client evidence only")
+        self.status.setText(f"{len(self.sets):,} PID sets • {cached_count:,} rendered • {missing_count:,} resolved/missing • {summary['unresolved']:,} unresolved • showing {min(len(filtered),500):,}")
+
+    def _resolved_assignments(self):
+        return enrich_assignments(self._basic_resolved_assignments())
 
     def show_folder_configuration(self):
         folder=self.folder_name();models=self.db.models_in_folder(folder,10000);textures=self.db.textures_in_folder(folder,100000)
