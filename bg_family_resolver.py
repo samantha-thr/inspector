@@ -280,8 +280,20 @@ def analyze_bg_families(product_sets,models,rules=None):
     if len(anchors)<2:
         return {"ok":False,"message":"Fewer than two BG reference models produced usable body-material UV masks.","assignments":{},"anchors":[]}
     fingerprint=_anchor_fingerprint(anchors)
+    previous=load_bg_cache()
+    reuse_previous=bool(previous and previous.get("anchor_fingerprint")==fingerprint)
+    previous_assignments=(previous.get("assignments") or {}) if reuse_previous else {}
     assignments={}
     counts={"resolved":0,"ambiguous":0,"special":0,"missing_body":0,"low_information":0}
+    reused=recomputed=0
+
+    def count_assignment(item):
+        method=item.get("method") or ""
+        if item.get("state")=="resolved":counts["resolved"]+=1
+        elif method=="BG special/non-paintable family":counts["special"]+=1
+        elif method=="BG low-information/solid-color texture":counts["low_information"]+=1
+        elif method=="BG body texture unavailable":counts["missing_body"]+=1
+        else:counts["ambiguous"]+=1
 
     for pid,paths in product_sets:
         body=next((Path(p) for p in paths if _slot(p)==1),None)
@@ -290,6 +302,15 @@ def analyze_bg_families(product_sets,models,rules=None):
             counts["missing_body"]+=1
             continue
 
+        body_stat=body.stat()
+        prior=previous_assignments.get(str(pid))
+        if prior and prior.get("body_size")==body_stat.st_size and prior.get("body_mtime_ns")==body_stat.st_mtime_ns:
+            assignments[str(pid)]=prior
+            count_assignment(prior)
+            reused+=1
+            continue
+
+        recomputed+=1
         candidate_occ=_foreground_occupancy(body)
         if candidate_occ["low_information"]:
             assignments[str(pid)]={
@@ -297,7 +318,7 @@ def analyze_bg_families(product_sets,models,rules=None):
                 "family_model":None,"template":None,"paintable":None,
                 "score":0.0,"margin":0.0,"votes":0,"scores":{},
                 "occupancy":{k:v for k,v in candidate_occ.items() if k!="mask"},
-                "body_path":str(body),"body_size":body.stat().st_size,"body_mtime_ns":body.stat().st_mtime_ns,
+                "body_path":str(body),"body_size":body_stat.st_size,"body_mtime_ns":body_stat.st_mtime_ns,
             }
             counts["low_information"]+=1
             continue
@@ -359,7 +380,7 @@ def analyze_bg_families(product_sets,models,rules=None):
             "model_uv":{"triangles":a["model_uv"]["triangles"],"area":a["model_uv"]["area"],"material_ids":a["model_uv"]["material_ids"]},
             "anchor_uv_metrics":{k:round(v,6) for k,v in a["anchor_uv_metrics"].items()},
         } for a in anchors],
-        "counts":counts,"assignments":assignments,
+        "counts":counts,"reused":reused,"recomputed":recomputed,"assignments":assignments,
     }
     CACHE_PATH.parent.mkdir(parents=True,exist_ok=True)
     CACHE_PATH.write_text(json.dumps(payload,indent=2),encoding="utf-8")
