@@ -704,14 +704,20 @@ def _resolve_material_texture_bindings(
                     assignments[idx] = p
                     sources[idx] = f"bg-ordinal-fallback:_{slot}"
         else:
-            # Every non-BG product model simply receives the supplied product
-            # texture(s). Slot N -> material ordinal N-1 is only a fallback;
-            # embedded-name matching above remains authoritative.
+            # Every non-BG product model simply receives its product texture(s).
+            # Read the model to find paintable/color-map materials; texture slot
+            # order maps across those materials, not across arbitrary materials.
+            # Embedded-name matching above remains the strongest evidence.
+            paint_materials = [m for m in model.materials if m.map_mask & (1 << 0)]
+            if not paint_materials:
+                paint_materials = list(model.materials)
             for slot, p in sorted(product_slots.items()):
-                idx = slot - 1
-                if idx in assignments and assignments[idx] is None:
-                    assignments[idx] = p
-                    sources[idx] = f"product-slot:_{slot}"
+                ordinal = slot - 1
+                if 0 <= ordinal < len(paint_materials):
+                    idx = paint_materials[ordinal].index
+                    if assignments[idx] is None:
+                        assignments[idx] = p
+                        sources[idx] = f"product-color-material-slot:_{slot}"
     elif unslotted:
         for material, p in zip(model.materials, sorted(unslotted, key=lambda x: x.name.lower())):
             if assignments[material.index] is None:
@@ -766,12 +772,15 @@ def _resolve_material_texture_bindings(
             "assigned_texture": str(assigned.resolve()) if assigned else None,
             "source": sources[material.index],
         })
+    color_materials = [m for m in model.materials if m.map_mask & (1 << 0)]
     details.append({
         "profile": profile,
         "summary": True,
         "linked_texture_count": len(linked),
         "assigned_material_count": sum(1 for p in assignments.values() if p is not None),
         "material_count": len(model.materials),
+        "color_material_count": len(color_materials),
+        "unassigned_color_materials": [m.name for m in color_materials if assignments[m.index] is None],
         "unused_linked_textures": [str(p.resolve()) for p in linked if str(p.resolve()) not in used],
     })
     return assignments, details
