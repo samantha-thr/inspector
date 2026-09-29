@@ -817,6 +817,17 @@ def export_obj(
     is_bg_variant = _is_bg_model_path(model_path)
 
     mtl_path = output_path.with_suffix(".mtl")
+    # Blender does not reliably decode every There DDS flavor (notably DXA5).
+    # Convert only render-facing references to PNG while preserving the original
+    # model/product filenames for resolver evidence.
+    from there_texture_decoder import blender_texture_path
+    blender_tex_cache = output_path.parent / "decoded_textures"
+    def ready_texture(path):
+        return blender_texture_path(path, blender_tex_cache) if path else None
+    for item in binding_details:
+        if item.get("assigned_texture"):
+            try:item["blender_texture"]=str(ready_texture(Path(item["assigned_texture"])).resolve())
+            except Exception as exc:item["blender_texture_error"]=str(exc)
     lines = [
         "# There Inspector native SOM v10 decode",
         f"# source: {model.path}",
@@ -905,20 +916,14 @@ def export_obj(
             "d 1.0",
             "illum 2",
         ])
-        texture = texture_assignments.get(material.index)
+        texture = map_assignments.get((material.index,0))
         if texture:
-            mtl_lines.append(f"map_Kd {texture.resolve().as_posix()}")
-        # BG is the only known vehicle family with a separate window-opacity
-        # companion texture. Never apply this convention to ordinary models.
-        if is_bg_variant and (material.map_mask & 0x03) == 0x03 and linked:
-            numbered = {}
-            for p in linked:
-                mm = re.match(r"^\\d+_([1-9]\\d*)\\.", p.name, re.IGNORECASE)
-                if mm:
-                    numbered[int(mm.group(1))] = p
-            alpha_slot = 4 if 3 in numbered and 4 in numbered else (3 if 2 in numbered and 3 in numbered and 4 not in numbered else None)
-            if alpha_slot:
-                mtl_lines.append(f"map_d {numbered[alpha_slot].resolve().as_posix()}")
+            mtl_lines.append(f"map_Kd {ready_texture(texture).resolve().as_posix()}")
+        # Opacity/cutout behavior now comes from the model's own map table.
+        # BG's slot convention was handled while constructing map_assignments.
+        alpha_texture = map_assignments.get((material.index,1)) or map_assignments.get((material.index,2))
+        if alpha_texture:
+            mtl_lines.append(f"map_d {ready_texture(alpha_texture).resolve().as_posix()}")
         mtl_lines.append("")
 
     mtl_path.write_text("\n".join(mtl_lines), encoding="utf-8")
