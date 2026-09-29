@@ -14,7 +14,7 @@ from there_texture_decoder import open_texture_image
 from there_model_decoder import decode_model
 
 
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 CACHE_PATH = Path("cache/bg_family_resolution.json")
 REPORT_ROOT = Path("reports/bg_family_analysis")
 QUANTILES = (0.70, 0.80, 0.85)
@@ -23,11 +23,15 @@ MIN_MARGIN = 0.035
 BACKGROUND_TOLERANCE = 38
 OCCUPANCY_WEIGHT = 0.25
 MODEL_UV_WEIGHT = 0.75
+UV_BOUNDARY_WEIGHT = 0.50
+TEMPLATE_ACTIVITY_WEIGHT = 0.25
+UV_PRECISION_WEIGHT = 0.20
+OCCUPANCY_WEIGHT = 0.05
 MIN_BORDER_BACKGROUND_SHARE = 0.15
 MIN_FOREGROUND_FRACTION = 0.04
 MAX_FOREGROUND_FRACTION = 0.96
 MIN_TEXTURE_STDDEV = 5.0
-ANALYSIS_ALGORITHM = "model-body-uv-v1"
+ANALYSIS_ALGORITHM = "model-body-uv-topology-v2"
 
 
 def _slot(path):
@@ -61,23 +65,25 @@ def _percentile_threshold(image: Image.Image, quantile: float):
     return 255
 
 
-def _activity_mask(path, quantile=0.80, size=256, feature_size=64):
-    """Artwork-agnostic-ish spatial activity mask.
-
-    It intentionally ignores color identity and focuses on where structural
-    changes occur on the flat template. This is materially more selective than
-    the old 8x8 mean-edge fingerprint.
-    """
+def _activity_masks(path, quantiles=QUANTILES, size=256, feature_size=64):
+    """Return structural edge masks for several thresholds after one decode."""
     im=open_texture_image(path).convert("RGB").resize((size,size),Image.Resampling.LANCZOS)
     r,g,b=im.split()
     er=r.filter(ImageFilter.FIND_EDGES)
     eg=g.filter(ImageFilter.FIND_EDGES)
     eb=b.filter(ImageFilter.FIND_EDGES)
     edge=ImageChops.lighter(ImageChops.lighter(er,eg),eb).filter(ImageFilter.GaussianBlur(1.25))
-    threshold=_percentile_threshold(edge,quantile)
-    binary=edge.point(lambda p:255 if p>=threshold else 0,"L").filter(ImageFilter.MaxFilter(5))
-    small=binary.resize((feature_size,feature_size),Image.Resampling.BOX)
-    return bytes(1 if p>=96 else 0 for p in small.getdata())
+    masks={}
+    for quantile in quantiles:
+        threshold=_percentile_threshold(edge,quantile)
+        binary=edge.point(lambda p:255 if p>=threshold else 0,"L").filter(ImageFilter.MaxFilter(5))
+        small=binary.resize((feature_size,feature_size),Image.Resampling.BOX)
+        masks[str(quantile)]=bytes(1 if p>=96 else 0 for p in small.getdata())
+    return masks
+
+
+def _activity_mask(path, quantile=0.80, size=256, feature_size=64):
+    return _activity_masks(path,(quantile,),size,feature_size)[str(quantile)]
 
 
 def _mask_iou(a: bytes,b: bytes):
@@ -159,7 +165,7 @@ def _texture_key(value):
 
 
 def _model_body_uv_mask(model_path, template_name, size=256, feature_size=64):
-    """Build a filled UV coverage mask from the model material that owns the stock body map."""
+    """Build filled UV coverage plus the actual body UV-island boundary topology."""
     model=decode_model(model_path)
     wanted=_texture_key(template_name)
     material_ids=[]
@@ -174,12 +180,20 @@ def _model_body_uv_mask(model_path, template_name, size=256, feature_size=64):
     if not material_ids:
         raise ValueError(f"{Path(model_path).name}: body material for {template_name} was not found")
 
-    mask=Image.new("L",(size,size),0);draw=ImageDraw.Draw(mask);triangles=0
+    mask=Image.new("L",(size,size),0)
+    boundary=Image.new("L",(size,size),0)
+    draw=ImageDraw.Draw(mask)
+    boundary_draw=ImageDraw.Draw(boundary)
+    triangles=0
+    boundary_edges=0
     if not model.lods:
         raise ValueError(f"{Path(model_path).name}: no LODs")
+
     for mesh in model.lods[0].meshes:
         if mesh.material_index not in material_ids:continue
         verts=mesh.vertices
+        edge_counts={}
+        edge_points={}
         for i in range(0,len(mesh.indices)-2,3):
             ids=mesh.indices[i:i+3]
             if any(idx>=len(verts) or verts[idx].uv0 is None for idx in ids):continue
@@ -187,13 +201,35 @@ def _model_body_uv_mask(model_path, template_name, size=256, feature_size=64):
             for idx in ids:
                 u,v=verts[idx].uv0
                 pts.append((round(u*(size-1)),round((1.0-v)*(size-1))))
-            draw.polygon(pts,fill=255);triangles+=1
+            draw.polygon(pts,fill=255)
+            triangles+=1
+            for a,b in ((0,1),(1,2),(2,0)):
+                key=tuple(sorted((ids[a],ids[b])))
+                edge_counts[key]=edge_counts.get(key,0)+1
+                edge_points[key]=(pts[a],pts[b])
+        for key,count in edge_counts.items():
+            if count==1:
+                boundary_draw.line(edge_points[key],fill=255,width=2)
+                boundary_edges+=1
+
+    # Give a texture edge a few pixels of tolerance around the exact UV seam.
+    boundary=boundary.filter(ImageFilter.MaxFilter(5))
     small=mask.resize((feature_size,feature_size),Image.Resampling.BOX)
+    boundary_small=boundary.resize((feature_size,feature_size),Image.Resampling.BOX)
     bits=bytes(1 if p>=64 else 0 for p in small.getdata())
+    boundary_bits=bytes(1 if p>=48 else 0 for p in boundary_small.getdata())
     area=sum(bits)
+    boundary_area=sum(boundary_bits)
     if triangles==0 or area==0:
         raise ValueError(f"{Path(model_path).name}: body material has no usable UV triangles")
-    return {"mask":bits,"triangles":triangles,"area":area,"material_ids":material_ids}
+    if boundary_edges==0 or boundary_area==0:
+        raise ValueError(f"{Path(model_path).name}: body material has no usable UV island boundaries")
+    return {
+        "mask":bits,"boundary_mask":boundary_bits,
+        "triangles":triangles,"area":area,
+        "boundary_edges":boundary_edges,"boundary_area":boundary_area,
+        "material_ids":material_ids,
+    }
 
 
 def _mask_metrics(a: bytes,b: bytes):
@@ -229,6 +265,9 @@ def _analysis_fingerprint(anchor_fingerprint):
         "algorithm":ANALYSIS_ALGORITHM,
         "background_tolerance":BACKGROUND_TOLERANCE,
         "model_uv_weight":MODEL_UV_WEIGHT,
+        "uv_boundary_weight":UV_BOUNDARY_WEIGHT,
+        "template_activity_weight":TEMPLATE_ACTIVITY_WEIGHT,
+        "uv_precision_weight":UV_PRECISION_WEIGHT,
         "occupancy_weight":OCCUPANCY_WEIGHT,
         "min_winner_score":MIN_WINNER_SCORE,
         "min_margin":MIN_MARGIN,
@@ -289,7 +328,7 @@ def analyze_bg_families(product_sets,models,rules=None):
 
     usable_anchors=[]
     for anchor in anchors:
-        anchor["masks"]={str(q):_activity_mask(anchor["path"],q) for q in QUANTILES}
+        anchor["masks"]=_activity_masks(anchor["path"])
         anchor["occupancy"]=_foreground_occupancy(anchor["path"])
         try:
             anchor["model_uv"]=_model_body_uv_mask(anchor["model_path"],anchor["template"])
@@ -334,6 +373,7 @@ def analyze_bg_families(product_sets,models,rules=None):
 
         recomputed+=1
         candidate_occ=_foreground_occupancy(body)
+        candidate_activity=_activity_masks(body)
         if candidate_occ["low_information"]:
             assignments[str(pid)]={
                 "state":"unresolved","method":"BG low-information/solid-color texture","model":None,
@@ -348,6 +388,9 @@ def analyze_bg_families(product_sets,models,rules=None):
         occupancy_scores={}
         uv_scores={}
         uv_metrics={}
+        uv_boundary_scores={}
+        template_activity_scores={}
+        uv_precision_scores={}
         combined={}
         for anchor in anchors:
             model_name=anchor["model"]
@@ -355,11 +398,33 @@ def analyze_bg_families(product_sets,models,rules=None):
                 occupancy_scores[model_name]=_mask_iou(candidate_occ["mask"],anchor["occupancy"]["mask"])
             else:
                 occupancy_scores[model_name]=None
-            metrics=_mask_metrics(candidate_occ["mask"],anchor["model_uv"]["mask"]) if candidate_occ["usable"] else {"iou":0.0,"dice":0.0,"precision":0.0,"coverage":0.0}
-            uv_metrics[model_name]=metrics
-            uv_scores[model_name]=metrics["dice"]
+
+            fill_metrics=_mask_metrics(candidate_occ["mask"],anchor["model_uv"]["mask"]) if candidate_occ["usable"] else {"iou":0.0,"dice":0.0,"precision":0.0,"coverage":0.0}
+            uv_metrics[model_name]=fill_metrics
+            uv_scores[model_name]=fill_metrics["dice"]
+            uv_precision_scores[model_name]=fill_metrics["precision"]
+
+            boundary_parts=[]
+            activity_parts=[]
+            for q in QUANTILES:
+                qkey=str(q)
+                boundary_metrics=_mask_metrics(candidate_activity[qkey],anchor["model_uv"]["boundary_mask"])
+                # Coverage asks whether the model's predicted UV seams are visible
+                # in the candidate; precision prevents a noisy full-canvas design
+                # from receiving a free pass.
+                boundary_parts.append(0.70*boundary_metrics["coverage"] + 0.30*boundary_metrics["precision"])
+                activity_parts.append(_mask_iou(candidate_activity[qkey],anchor["masks"][qkey]))
+            uv_boundary_scores[model_name]=sum(boundary_parts)/len(boundary_parts)
+            template_activity_scores[model_name]=sum(activity_parts)/len(activity_parts)
+
             occ=occupancy_scores[model_name]
-            combined[model_name]=(MODEL_UV_WEIGHT*uv_scores[model_name] + OCCUPANCY_WEIGHT*(occ if occ is not None else uv_scores[model_name]))
+            occ_score=occ if occ is not None else 0.0
+            combined[model_name]=(
+                UV_BOUNDARY_WEIGHT*uv_boundary_scores[model_name]
+                + TEMPLATE_ACTIVITY_WEIGHT*template_activity_scores[model_name]
+                + UV_PRECISION_WEIGHT*uv_precision_scores[model_name]
+                + OCCUPANCY_WEIGHT*occ_score
+            )
 
         ranked=sorted(combined.items(),key=lambda x:x[1],reverse=True)
         winner,score80=ranked[0]
@@ -383,6 +448,9 @@ def analyze_bg_families(product_sets,models,rules=None):
             "scores":{k:round(v,6) for k,v in combined.items()},
             "uv_scores":{k:round(v,6) for k,v in uv_scores.items()},
             "uv_metrics":{k:{mk:round(mv,6) for mk,mv in vals.items()} for k,vals in uv_metrics.items()},
+            "uv_boundary_scores":{k:round(v,6) for k,v in uv_boundary_scores.items()},
+            "template_activity_scores":{k:round(v,6) for k,v in template_activity_scores.items()},
+            "uv_precision_scores":{k:round(v,6) for k,v in uv_precision_scores.items()},
             "occupancy_scores":{k:(round(v,6) if v is not None else None) for k,v in occupancy_scores.items()},
             "occupancy":{k:v for k,v in candidate_occ.items() if k!="mask"},
             "body_path":str(body),"body_size":body.stat().st_size,"body_mtime_ns":body.stat().st_mtime_ns,
@@ -395,13 +463,15 @@ def analyze_bg_families(product_sets,models,rules=None):
         "algorithm":ANALYSIS_ALGORITHM,
         "thresholds":{
             "quantiles":QUANTILES,"min_winner_score":MIN_WINNER_SCORE,"min_margin":MIN_MARGIN,
-            "background_tolerance":BACKGROUND_TOLERANCE,"model_uv_weight":MODEL_UV_WEIGHT,"occupancy_weight":OCCUPANCY_WEIGHT,
+            "background_tolerance":BACKGROUND_TOLERANCE,"model_uv_weight":MODEL_UV_WEIGHT,
+            "uv_boundary_weight":UV_BOUNDARY_WEIGHT,"template_activity_weight":TEMPLATE_ACTIVITY_WEIGHT,
+            "uv_precision_weight":UV_PRECISION_WEIGHT,"occupancy_weight":OCCUPANCY_WEIGHT,
             "min_texture_stddev":MIN_TEXTURE_STDDEV,
         },
         "anchors":[{
             "model":a["model"],"model_path":a["model_path"],"template":a["template"],"paintable":a["paintable"],
             "occupancy":{k:v for k,v in a["occupancy"].items() if k!="mask"},
-            "model_uv":{"triangles":a["model_uv"]["triangles"],"area":a["model_uv"]["area"],"material_ids":a["model_uv"]["material_ids"]},
+            "model_uv":{"triangles":a["model_uv"]["triangles"],"area":a["model_uv"]["area"],"boundary_edges":a["model_uv"]["boundary_edges"],"boundary_area":a["model_uv"]["boundary_area"],"material_ids":a["model_uv"]["material_ids"]},
             "anchor_uv_metrics":{k:round(v,6) for k,v in a["anchor_uv_metrics"].items()},
         } for a in anchors],
         "counts":counts,"reused":reused,"recomputed":recomputed,"assignments":assignments,
@@ -422,9 +492,9 @@ def _write_report(payload):
     with open(cp,"w",newline="",encoding="utf-8-sig") as fh:
         w=csv.writer(fh)
         models=[a["model"] for a in payload.get("anchors",[])]
-        w.writerow(["pid","state","method","family_model","template","score","margin","votes","foreground_fraction","border_background_share","stddev",*[f"combined:{m}" for m in models],*[f"uv:{m}" for m in models],*[f"occupancy:{m}" for m in models]])
+        w.writerow(["pid","state","method","family_model","template","score","margin","votes","foreground_fraction","border_background_share","stddev",*[f"combined:{m}" for m in models],*[f"boundary:{m}" for m in models],*[f"activity:{m}" for m in models],*[f"uv_precision:{m}" for m in models],*[f"uv_dice:{m}" for m in models],*[f"occupancy:{m}" for m in models]])
         for pid,x in sorted(payload.get("assignments",{}).items(),key=lambda kv:int(kv[0]) if kv[0].isdigit() else kv[0]):
-            occ=x.get("occupancy") or {};w.writerow([pid,x.get("state"),x.get("method"),x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),occ.get("foreground_fraction",""),occ.get("border_background_share",""),occ.get("stddev",""),*[x.get("scores",{}).get(m,"") for m in models],*[x.get("uv_scores",{}).get(m,"") for m in models],*[x.get("occupancy_scores",{}).get(m,"") for m in models]])
+            occ=x.get("occupancy") or {};w.writerow([pid,x.get("state"),x.get("method"),x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),occ.get("foreground_fraction",""),occ.get("border_background_share",""),occ.get("stddev",""),*[x.get("scores",{}).get(m,"") for m in models],*[x.get("uv_boundary_scores",{}).get(m,"") for m in models],*[x.get("template_activity_scores",{}).get(m,"") for m in models],*[x.get("uv_precision_scores",{}).get(m,"") for m in models],*[x.get("uv_scores",{}).get(m,"") for m in models],*[x.get("occupancy_scores",{}).get(m,"") for m in models]])
     payload["report_csv"]=str(cp)
     payload["report_json"]=str(jp)
 
