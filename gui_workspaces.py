@@ -10,6 +10,7 @@ from there_texture_decoder import open_texture_image
 from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_conversion_job, inspect_conversion_source, prepare_conversion_job
 from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION, cached_variant_thumbnail, render_model_variant, remove_cached_variant, PersistentVariantWorker
 from uv_intelligence import analyze_model_uv, compare_uv_fingerprints
+from model_forensics import analyze_model_rows
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -649,6 +650,60 @@ class VehicleVariantsPage(QWidget):
             self.status.setText(f"Stopped • completed {result['completed']:,} • rendered {result['rendered']:,} • failed {result['failed']:,}")
         else:
             self.progress.setValue(self.progress.maximum());self.status.setText(f"Complete • rendered {result['rendered']:,} • cached {result['cached']:,} • failed {result['failed']:,}")
+
+class IntelligencePage(QWidget):
+    def __init__(self,db):
+        super().__init__();self.db=db;self.task=None;self.result=None;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        h=QLabel("Intelligence");h.setObjectName("title");b.addWidget(h)
+        sub=QLabel("Evidence-first model analysis. Inspector reports relationships it can prove from deterministic fingerprints; unsupported assets remain unknown.");sub.setWordWrap(True);b.addWidget(sub)
+        row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(260)
+        self.folder.addItem("All indexed model folders",None)
+        for x in self.db.asset_folders():
+            if int(x["model_count"] or 0):self.folder.addItem(f"{x['folder']}  •  {int(x['model_count']):,} models",x["folder"])
+        idx=self.folder.findData("bg")
+        if idx>=0:self.folder.setCurrentIndex(idx)
+        go=QPushButton("Analyze Model Facts");go.clicked.connect(self.analyze);self.go=go
+        row.addWidget(QLabel("Scope"));row.addWidget(self.folder,1);row.addWidget(go);b.addLayout(row)
+        cards=QHBoxLayout();self.models_card=QLabel("Models\n—");self.relationship_card=QLabel("Proven relationships\n—");self.unknown_card=QLabel("Unsupported / unknown\n—")
+        for c in (self.models_card,self.relationship_card,self.unknown_card):
+            c.setObjectName("card");c.setAlignment(Qt.AlignCenter);c.setMinimumHeight(72);cards.addWidget(c)
+        b.addLayout(cards)
+        self.status=QLabel("Ready. Start with BG to validate the evidence model.");self.status.setWordWrap(True);b.addWidget(self.status)
+        self.table=QTableWidget(0,5);self.table.setHorizontalHeaderLabels(["Evidence","LOD","Asset A","Asset B","Fingerprint"]);self.table.setSelectionBehavior(QAbstractItemView.SelectRows);self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(4,QHeaderView.Stretch);b.addWidget(self.table,1)
+        self.unknown=QPlainTextEdit();self.unknown.setReadOnly(True);self.unknown.setMaximumHeight(120);self.unknown.setPlaceholderText("Unsupported / unknown assets will be listed here instead of guessed.");b.addWidget(self.unknown)
+
+    def _rows(self):
+        folder=self.folder.currentData()
+        if folder:return self.db.models_in_folder(folder,100000)
+        rows=[];offset=0
+        while True:
+            page,total=self.db.search_models_page("",2000,offset);rows.extend(page);offset+=len(page)
+            if not page or offset>=total:break
+        return rows
+
+    def analyze(self):
+        if self.task and self.task.isRunning():return
+        rows=self._rows()
+        if not rows:self.status.setText("No models in this scope.");return
+        self.go.setEnabled(False);self.status.setText(f"Reading deterministic model facts for {len(rows):,} model(s)… No similarity thresholds are used.")
+        self.task=Task(analyze_model_rows,rows);self.task.done.connect(self.finished);self.task.failed.connect(self.failed);self.task.start()
+
+    def failed(self,error):
+        self.go.setEnabled(True);self.task=None;self.status.setText(error);QMessageBox.critical(self,APP_NAME,error)
+
+    def finished(self,result):
+        self.go.setEnabled(True);self.task=None;self.result=result;rels=result["relationships"];unknown=result["unsupported"]
+        self.models_card.setText(f"Models\n{result['models']:,}");self.relationship_card.setText(f"Proven relationships\n{len(rels):,}");self.unknown_card.setText(f"Unsupported / unknown\n{len(unknown):,}")
+        self.table.setRowCount(len(rels))
+        for r,x in enumerate(rels):
+            lod="—" if x["lod"]<0 else f"LOD{x['lod']}"
+            for c,v in enumerate((x["evidence"],lod,x["filename_a"],x["filename_b"],x["fingerprint"][:20]+"…")):self.table.setItem(r,c,QTableWidgetItem(str(v)))
+            self.table.item(r,2).setToolTip(x["asset_a"]);self.table.item(r,3).setToolTip(x["asset_b"])
+        self.unknown.setPlainText("\n".join(f"{x['filename']}: {x['reason']}" for x in unknown))
+        counts=" • ".join(f"{k}: {v:,}" for k,v in sorted(result["counts"].items()))
+        self.status.setText(f"Complete • {result['decoded']:,}/{result['models']:,} decoded • {len(rels):,} proven relationships" + (f" • {counts}" if counts else " • no exact relationships in this scope"))
+
 
 class ComparePage(QWidget):
     def __init__(self,db):
