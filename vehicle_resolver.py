@@ -158,8 +158,28 @@ def folder_configuration(folder, models, textures):
 
 
 def enrich_assignments(assignments):
-    """Attach non-inferential sibling config evidence to resolver output."""
+    """Attach non-inferential sibling config evidence with one directory scan per folder."""
+    parents={}
+    for x in assignments:
+        paths=x.get("textures") or []
+        if not paths:continue
+        parent=Path(paths[0]).parent
+        parents.setdefault(parent,None)
+    for parent in list(parents):
+        index={}
+        try:
+            for p in parent.glob("*.aconf"):
+                index[p.stem.lower()]=p
+        except Exception:
+            pass
+        parents[parent]=index
+
     out=[]
     for x in assignments:
-        y=dict(x);y["aconf"]=aconf_evidence(y["pid"],y["textures"]);out.append(y)
+        y=dict(x);paths=y.get("textures") or [];hit=None
+        if paths:
+            parent=Path(paths[0]).parent
+            hit=(parents.get(parent) or {}).get(str(y["pid"]).lower())
+        y["aconf"]={"exists":bool(hit),"path":str(hit) if hit else None,"strings":_printable_strings(hit) if hit else []}
+        out.append(y)
     return out
