@@ -618,73 +618,108 @@ def _safe_name(value: str) -> str:
     return value.strip("_") or "unnamed"
 
 
-def _resolve_material_textures(
+def _is_bg_model_path(model_path: Path) -> bool:
+    """BG is the only known There vehicle family requiring window/opacity pairing."""
+    try:
+        return model_path.parent.name.lower() == "bg"
+    except Exception:
+        return False
+
+
+def _resolve_material_texture_bindings(
     model: DecodedModel,
     model_path: Path,
     linked_textures: list[Path],
-) -> dict[int, Path | None]:
-    """Best-effort material -> texture assignment.
+) -> tuple[dict[int, Path | None], list[dict[str, Any]]]:
+    """Resolve product textures from the model itself.
 
-    Player product models typically use external PID DDS files, while named
-    assets may contain resource-relative texture references. We prefer linked
-    textures supplied by There Inspector and fall back to embedded names.
+    Normal There product models are model-driven: first honor embedded texture
+    references, then use PID texture ordinal as a fallback. BG is the sole
+    special case with a color+opacity window companion.
     """
-
     linked = [Path(p) for p in linked_textures if Path(p).exists()]
     assignments: dict[int, Path | None] = {m.index: None for m in model.materials}
+    sources: dict[int, str] = {m.index: "unassigned" for m in model.materials}
+    profile = "bg-window-opacity" if _is_bg_model_path(model_path) else "model-driven"
 
-    if linked:
-        # There product models often embed their intended texture names. Prefer
-        # that direct model evidence before applying any slot convention.
-        import re
-        product_slots = {}
-        unslotted = []
-        for p in linked:
-            match = re.match(r"^(\d+)_([1-9]\d*)\.", p.name, re.IGNORECASE)
-            if match: product_slots[int(match.group(2))] = p
-            else: unslotted.append(p)
-
-        def norm_tex_name(value):
-            name=Path(str(value).replace("\\","/")).name.lower()
-            return name[:-4] if name.endswith(".dds") else name
-
-        linked_by_name={norm_tex_name(p.name):p for p in linked}
-        for material in model.materials:
-            for embedded in material.textures:
-                key=norm_tex_name(embedded)
-                hit=linked_by_name.get(key)
-                if hit is None:
-                    # Common client form: embedded name ends at .jpg/.png while
-                    # the installed texture is that name plus .dds.
-                    hit=next((p for k,p in linked_by_name.items() if k==key or k.startswith(key+".")),None)
-                if hit is not None:
-                    assignments[material.index]=hit
-                    break
-
-        if product_slots:
-            window_material = next((m for m in model.materials
-                                    if (m.map_mask & (1 << 0)) and (m.map_mask & (1 << 1))), None)
-            buggy_semantics = window_material is not None
-            if buggy_semantics:
-                body_material = next((m for m in model.materials
-                                      if (m.map_mask & (1 << 0)) and not (m.map_mask & ((1 << 1) | (1 << 2)))), None)
-                if body_material is None and model.materials: body_material=model.materials[0]
-                if 1 in product_slots and body_material and assignments[body_material.index] is None:
-                    assignments[body_material.index]=product_slots[1]
-                if 3 in product_slots and assignments[window_material.index] is None:
-                    assignments[window_material.index]=product_slots[3]
-                if 3 in product_slots and window_material is None and len(model.materials)>=2:
-                    assignments[model.materials[1].index]=product_slots[3]
-            # For ordinary PID-specific product models, slot N maps to material
-            # ordinal N-1 only as a fallback after embedded-name evidence.
-            for slot,p in sorted(product_slots.items()):
-                idx=slot-1
-                if idx in assignments and assignments[idx] is None:
-                    assignments[idx]=p
+    import re
+    product_slots: dict[int, Path] = {}
+    unslotted: list[Path] = []
+    for p in linked:
+        match = re.match(r"^(\d+)_([1-9]\d*)\.", p.name, re.IGNORECASE)
+        if match:
+            product_slots[int(match.group(2))] = p
         else:
-            for material,p in zip(model.materials,sorted(unslotted,key=lambda x:x.name.lower())):
-                if assignments[material.index] is None: assignments[material.index] = p
+            unslotted.append(p)
 
+    def norm_tex_name(value):
+        name = Path(str(value).replace("\\", "/")).name.lower()
+        return name[:-4] if name.endswith(".dds") else name
+
+    # 1) Strongest evidence: the model's own embedded texture name matches a
+    # supplied PID texture.
+    linked_by_name = {norm_tex_name(p.name): p for p in linked}
+    for material in model.materials:
+        for embedded in material.textures:
+            key = norm_tex_name(embedded)
+            hit = linked_by_name.get(key)
+            if hit is None:
+                hit = next((p for k, p in linked_by_name.items()
+                            if k == key or k.startswith(key + ".")), None)
+            if hit is not None:
+                assignments[material.index] = hit
+                sources[material.index] = f"embedded-name:{embedded}"
+                break
+
+    if product_slots:
+        if profile == "bg-window-opacity":
+            # BG alone uses the special body / window color / window opacity
+            # convention. Support both known generations.
+            present = set(product_slots)
+            window_color_slot = 3 if {3, 4}.issubset(present) else (2 if {2, 3}.issubset(present) else None)
+            body_material = next((m for m in model.materials
+                                  if (m.map_mask & (1 << 0))
+                                  and not (m.map_mask & ((1 << 1) | (1 << 2)))), None)
+            window_material = next((m for m in model.materials
+                                    if (m.map_mask & (1 << 0))
+                                    and (m.map_mask & (1 << 1))), None)
+            if body_material is None and model.materials:
+                body_material = model.materials[0]
+            if window_material is None and len(model.materials) >= 2:
+                window_material = model.materials[1]
+            if 1 in product_slots and body_material and assignments[body_material.index] is None:
+                assignments[body_material.index] = product_slots[1]
+                sources[body_material.index] = "bg-body-slot:_1"
+            if window_color_slot and window_material and assignments[window_material.index] is None:
+                assignments[window_material.index] = product_slots[window_color_slot]
+                sources[window_material.index] = f"bg-window-color-slot:_{window_color_slot}"
+            # Any remaining BG texture slots can still populate otherwise
+            # unassigned materials by ordinal, but never reinterpret them as
+            # window/opacity semantics here.
+            for slot, p in sorted(product_slots.items()):
+                if slot in (1, window_color_slot):
+                    continue
+                idx = slot - 1
+                if idx in assignments and assignments[idx] is None:
+                    assignments[idx] = p
+                    sources[idx] = f"bg-ordinal-fallback:_{slot}"
+        else:
+            # Every non-BG product model simply receives the supplied product
+            # texture(s). Slot N -> material ordinal N-1 is only a fallback;
+            # embedded-name matching above remains authoritative.
+            for slot, p in sorted(product_slots.items()):
+                idx = slot - 1
+                if idx in assignments and assignments[idx] is None:
+                    assignments[idx] = p
+                    sources[idx] = f"product-slot:_{slot}"
+    elif unslotted:
+        for material, p in zip(model.materials, sorted(unslotted, key=lambda x: x.name.lower())):
+            if assignments[material.index] is None:
+                assignments[material.index] = p
+                sources[material.index] = "unslotted-order"
+
+    # 2) Fill any material still unassigned from the resource path explicitly
+    # embedded in the model. This keeps official/default materials intact.
     resource_root = None
     parts = list(model_path.resolve().parts)
     try:
@@ -696,7 +731,6 @@ def _resolve_material_textures(
     for material in model.materials:
         if assignments[material.index] is not None:
             continue
-
         for embedded in material.textures:
             candidates = []
             embedded_path = Path(embedded.replace("/", str(Path("/"))))
@@ -709,17 +743,47 @@ def _resolve_material_textures(
             candidates.extend([
                 model_path.parent / embedded_path.name,
                 model_path.parent / (embedded_path.name + ".dds"),
-                model_path.parent / (embedded_path.name.rsplit(".", 1)[0] + "_1.jpg.dds"),
             ])
             for candidate in candidates:
                 if candidate.exists():
                     assignments[material.index] = candidate
+                    sources[material.index] = f"embedded-resource:{embedded}"
                     break
             if assignments[material.index] is not None:
                 break
 
-    return assignments
+    details = []
+    used = {str(p.resolve()) for p in assignments.values() if p is not None}
+    for material in model.materials:
+        assigned = assignments[material.index]
+        details.append({
+            "profile": profile,
+            "material_index": material.index,
+            "material_name": material.name,
+            "map_mask": material.map_mask,
+            "map_bits": [b for b in range(7) if material.map_mask & (1 << b)],
+            "embedded_textures": list(material.textures),
+            "assigned_texture": str(assigned.resolve()) if assigned else None,
+            "source": sources[material.index],
+        })
+    details.append({
+        "profile": profile,
+        "summary": True,
+        "linked_texture_count": len(linked),
+        "assigned_material_count": sum(1 for p in assignments.values() if p is not None),
+        "material_count": len(model.materials),
+        "unused_linked_textures": [str(p.resolve()) for p in linked if str(p.resolve()) not in used],
+    })
+    return assignments, details
 
+
+def _resolve_material_textures(
+    model: DecodedModel,
+    model_path: Path,
+    linked_textures: list[Path],
+) -> dict[int, Path | None]:
+    assignments, _ = _resolve_material_texture_bindings(model, model_path, linked_textures)
+    return assignments
 
 def export_obj(
     model: DecodedModel,
