@@ -11,7 +11,7 @@ WORK_DIR=PROJECT_DIR/"cache"/"thumbnail_work"
 FAILURE_LOG=PROJECT_DIR/"cache"/"thumbnail_failures.jsonl"
 METADATA_DIR=PROJECT_DIR/"cache"/"model_thumbnail_meta"
 RENDER_VERSION=2
-VARIANT_RENDER_VERSION=8
+VARIANT_RENDER_VERSION=9
 VARIANT_CACHE_DIR=PROJECT_DIR/"cache"/"model_variants"
 
 def thumbnail_key(model_path):
@@ -151,11 +151,90 @@ def render_model_variant(model_path,texture_paths,size=512,force=False,cancel_ev
     if not blender:return {"success":False,"message":"Blender not detected"}
     decoded=decode_model(model_path);key=variant_key(model_path,texture_paths,size);obj=WORK_DIR/f"variant_{key}.obj"
     export_info=export_obj(decoded,obj,texture_paths,include_collision=False);script=_script(obj,out,size)
+    import re
+    is_bg_variant=model_path.parent.name.lower()=="bg"
+
+    # For every non-BG product, rebuild the material maps from the map table
+    # decoded from that exact .model. This replaces unsupported/raw DDS paths
+    # with Blender-safe PNGs and honors color/opacity/detail/gloss/emission/normal.
+    if not is_bg_variant:
+        bindings=[]
+        for b in export_info.get("texture_bindings",[]):
+            if b.get("summary") or not b.get("blender_texture"): continue
+            item=dict(b);item["material_name"]=re.sub(r"[^A-Za-z0-9_.-]+","_",item.get("material_name") or "").strip("_") or "unnamed";bindings.append(item)
+        if bindings:
+            txt=script.read_text(encoding="utf-8")
+            setup="THERE_MAP_BINDINGS="+repr(bindings)+"\n"
+            block=r'''# There model-driven material map reconstruction.
+def _there_find_mat(name):
+    for mat in bpy.data.materials:
+        if mat and mat.use_nodes and (mat.name==name or mat.name.startswith(name+".")):
+            return mat
+    return None
+
+for binding in THERE_MAP_BINDINGS:
+    try:
+        mat=_there_find_mat(binding.get("material_name",""))
+        if not mat: continue
+        nodes=mat.node_tree.nodes; links=mat.node_tree.links
+        bsdf=nodes.get("Principled BSDF")
+        if not bsdf: continue
+        img=bpy.data.images.load(binding["blender_texture"],check_existing=True)
+        role=binding.get("map_role","color")
+        tex=nodes.new("ShaderNodeTexImage"); tex.image=img; tex.label="There "+role
+        if role!="color":
+            try: tex.image.colorspace_settings.name="Non-Color"
+            except Exception: pass
+        if role=="color":
+            inp=bsdf.inputs.get("Base Color")
+            if inp:
+                while inp.is_linked: links.remove(inp.links[0])
+                links.new(tex.outputs["Color"],inp)
+        elif role in ("opacity","cutout"):
+            inp=bsdf.inputs.get("Alpha")
+            if inp:
+                while inp.is_linked: links.remove(inp.links[0])
+                links.new(tex.outputs["Color"],inp)
+                mat.surface_render_method="DITHERED"
+        elif role=="lighting/detail":
+            inp=bsdf.inputs.get("Base Color")
+            if inp:
+                old=inp.links[0].from_socket if inp.is_linked else None
+                if inp.is_linked:
+                    while inp.is_linked: links.remove(inp.links[0])
+                if old:
+                    mix=nodes.new("ShaderNodeMixRGB"); mix.blend_type="MULTIPLY"; mix.inputs[0].default_value=1.0
+                    links.new(old,mix.inputs[1]); links.new(tex.outputs["Color"],mix.inputs[2]); links.new(mix.outputs["Color"],inp)
+                else:
+                    links.new(tex.outputs["Color"],inp)
+        elif role=="gloss":
+            inp=bsdf.inputs.get("Roughness")
+            if inp:
+                inv=nodes.new("ShaderNodeInvert"); links.new(tex.outputs["Color"],inv.inputs["Color"])
+                while inp.is_linked: links.remove(inp.links[0])
+                links.new(inv.outputs["Color"],inp)
+        elif role=="emission":
+            inp=bsdf.inputs.get("Emission Color") or bsdf.inputs.get("Emission")
+            if inp:
+                while inp.is_linked: links.remove(inp.links[0])
+                links.new(tex.outputs["Color"],inp)
+                strength=bsdf.inputs.get("Emission Strength")
+                if strength: strength.default_value=1.0
+        elif role=="normal":
+            inp=bsdf.inputs.get("Normal")
+            if inp:
+                nrm=nodes.new("ShaderNodeNormalMap"); links.new(tex.outputs["Color"],nrm.inputs["Color"])
+                while inp.is_linked: links.remove(inp.links[0])
+                links.new(nrm.outputs["Normal"],inp)
+    except Exception as e:
+        print("There model map warning:",binding,e)
+'''
+            marker="# Preserve alpha from texture-driven materials (notably buggy window layers)."
+            txt=setup+txt.replace(marker,block+"\n"+marker)
+            script.write_text(txt,encoding="utf-8")
     # BG alone uses the separate window color / window opacity convention.
     # Every other There product model relies on the model-driven assignments
     # already written to the OBJ/MTL by export_obj().
-    import re
-    is_bg_variant=model_path.parent.name.lower()=="bg"
     slots={}
     for tp in texture_paths:
         m=re.match(r"^\d+_([1-9]\d*)\.",Path(tp).name,re.IGNORECASE)
