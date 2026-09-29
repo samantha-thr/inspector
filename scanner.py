@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import time
 import zlib
 from pathlib import Path
@@ -33,16 +34,24 @@ def hash_file(path: Path) -> tuple[str, str, int]:
     return sha.hexdigest(), md5.hexdigest(), crc & 0xFFFFFFFF
 
 
+def _discover_by_suffix(root: Path, suffixes) -> list[Path]:
+    """Walk the resource tree once and filter extensions in Python."""
+    wanted={str(x).lower() for x in suffixes}
+    files: list[Path] = []
+    for dirpath, _, filenames in os.walk(root):
+        base=Path(dirpath)
+        for name in filenames:
+            if Path(name).suffix.lower() in wanted:
+                files.append(base/name)
+    return sorted(files, key=lambda p: str(p).lower())
+
+
 def discover_models(root: Path) -> list[Path]:
-    return sorted(root.rglob(f"*{MODEL_EXTENSION}"), key=lambda p: str(p).lower())
+    return _discover_by_suffix(root,(MODEL_EXTENSION,))
 
 
 def discover_textures(root: Path) -> list[Path]:
-    files: list[Path] = []
-    for ext in TEXTURE_EXTENSIONS:
-        files.extend(root.rglob(f"*{ext}"))
-        files.extend(root.rglob(f"*{ext.upper()}"))
-    return sorted(set(files), key=lambda p: str(p).lower())
+    return _discover_by_suffix(root,TEXTURE_EXTENSIONS)
 
 
 def safe_relative_path(path: Path, root: Path) -> str:
