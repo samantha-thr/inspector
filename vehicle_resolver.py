@@ -65,7 +65,7 @@ def resolve_products(folder,models,product_sets):
             body=next((p for p in paths if re.match(r"^\\d+_1\\.",Path(p).name,re.IGNORECASE)),None)
             bg=cached_bg_assignment(pid,body)
             if bg and bg.get("state")=="resolved" and bg.get("model"):
-                model=by_name.get(str(bg["model"]).lower());method=bg.get("method") or "verified BG template family";state="resolved" if model else "unresolved"
+                model=by_name.get(str(bg["model"]).lower());method=bg.get("method") or "BG structural family match";state="resolved" if model else "unresolved"
                 if not model:method="BG family model unavailable"
             else:
                 model=None;method=(bg.get("method") if bg else "BG family analysis required");state="unresolved"
