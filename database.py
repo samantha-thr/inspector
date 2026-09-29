@@ -21,6 +21,63 @@ class Database:
     def close(self):
         self.db.close()
 
+    def maintenance_cleanup(self):
+        """Remove dead indexed paths, trim test history and compact SQLite."""
+        self.commit()
+        before=self.path.stat().st_size if self.path.exists() else 0
+        model_paths=[r["path"] for r in self.db.execute("SELECT path FROM models").fetchall()]
+        texture_paths=[r["path"] for r in self.db.execute("SELECT path FROM textures").fetchall()]
+        missing_models=[p for p in model_paths if not Path(p).exists()]
+        missing_textures=[p for p in texture_paths if not Path(p).exists()]
+
+        self.db.execute("CREATE TEMP TABLE IF NOT EXISTS inspector_stale(path TEXT PRIMARY KEY)")
+        self.db.execute("DELETE FROM inspector_stale")
+        if missing_models:
+            self.db.executemany("INSERT OR IGNORE INTO inspector_stale(path) VALUES(?)",[(p,) for p in missing_models])
+            for sql in (
+                "DELETE FROM model_texture_links WHERE model_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM model_texture_status WHERE model_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM model_family_members WHERE model_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM evidence_pairs WHERE model_a IN (SELECT path FROM inspector_stale) OR model_b IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM asset_reviews WHERE asset_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM asset_tags WHERE asset_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM asset_notes WHERE asset_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM models WHERE path IN (SELECT path FROM inspector_stale)",
+            ): self.db.execute(sql)
+
+        self.db.execute("DELETE FROM inspector_stale")
+        if missing_textures:
+            self.db.executemany("INSERT OR IGNORE INTO inspector_stale(path) VALUES(?)",[(p,) for p in missing_textures])
+            for sql in (
+                "DELETE FROM model_texture_links WHERE texture_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM texture_family_members WHERE texture_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM texture_evidence_pairs WHERE texture_a IN (SELECT path FROM inspector_stale) OR texture_b IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM asset_reviews WHERE asset_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM asset_tags WHERE asset_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM asset_notes WHERE asset_path IN (SELECT path FROM inspector_stale)",
+                "DELETE FROM textures WHERE path IN (SELECT path FROM inspector_stale)",
+            ): self.db.execute(sql)
+        self.db.execute("DELETE FROM inspector_stale")
+
+        self.db.execute("DELETE FROM model_families WHERE id NOT IN (SELECT DISTINCT family_id FROM model_family_members)")
+        self.db.execute("UPDATE model_families SET member_count=(SELECT COUNT(*) FROM model_family_members m WHERE m.family_id=model_families.id)")
+        self.db.execute("DELETE FROM texture_families WHERE id NOT IN (SELECT DISTINCT family_id FROM texture_family_members)")
+        self.db.execute("UPDATE texture_families SET member_count=(SELECT COUNT(*) FROM texture_family_members m WHERE m.family_id=texture_families.id)")
+        self.db.execute("DELETE FROM scan_history WHERE id NOT IN (SELECT id FROM scan_history ORDER BY id DESC LIMIT 500)")
+        self.db.execute("DELETE FROM analysis_runs WHERE id NOT IN (SELECT id FROM analysis_runs ORDER BY id DESC LIMIT 500)")
+        self.commit()
+
+        try:self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+        except sqlite3.OperationalError:pass
+        self.db.execute("PRAGMA optimize")
+        self.commit()
+        self.db.execute("VACUUM")
+        self.db.execute("PRAGMA optimize")
+        self.commit()
+        after=self.path.stat().st_size if self.path.exists() else 0
+        return {"missing_models":len(missing_models),"missing_textures":len(missing_textures),
+                "before_bytes":before,"after_bytes":after,"reclaimed_bytes":max(0,before-after)}
+
     def commit(self):
         self.db.commit()
 
@@ -183,6 +240,8 @@ class Database:
         self.db.executescript("""
         CREATE INDEX IF NOT EXISTS idx_models_folder ON models(folder);
         CREATE INDEX IF NOT EXISTS idx_models_filename ON models(filename);
+        CREATE INDEX IF NOT EXISTS idx_models_root ON models(root);
+        CREATE INDEX IF NOT EXISTS idx_models_folder_filename ON models(folder,filename);
         CREATE INDEX IF NOT EXISTS idx_models_sha256 ON models(sha256);
         CREATE INDEX IF NOT EXISTS idx_models_prefix ON models(prefix_4k_sha256);
         CREATE INDEX IF NOT EXISTS idx_models_suffix ON models(suffix_4k_sha256);
@@ -190,6 +249,8 @@ class Database:
 
         CREATE INDEX IF NOT EXISTS idx_textures_folder ON textures(folder);
         CREATE INDEX IF NOT EXISTS idx_textures_filename ON textures(filename);
+        CREATE INDEX IF NOT EXISTS idx_textures_root ON textures(root);
+        CREATE INDEX IF NOT EXISTS idx_textures_folder_filename ON textures(folder,filename);
         CREATE INDEX IF NOT EXISTS idx_textures_sha256 ON textures(sha256);
         CREATE INDEX IF NOT EXISTS idx_textures_ahash ON textures(ahash);
         CREATE INDEX IF NOT EXISTS idx_textures_hist ON textures(histogram_hash);
@@ -314,12 +375,22 @@ class Database:
         return self.db.execute("SELECT * FROM textures WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ? OR dds_format LIKE ? ORDER BY folder,filename LIMIT ?", (like, like, like, like, like, limit)).fetchall()
 
     def search_models_page(self, term="", limit=1000, offset=0):
+        term=str(term or "").strip()
+        if not term:
+            rows=self.db.execute("SELECT * FROM models ORDER BY folder,filename LIMIT ? OFFSET ?",(limit,offset)).fetchall()
+            total=self.db.execute("SELECT COUNT(*) FROM models").fetchone()[0]
+            return rows,total
         like=f"%{term}%"
         rows=self.db.execute("SELECT * FROM models WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ? ORDER BY folder,filename LIMIT ? OFFSET ?",(like,like,like,like,limit,offset)).fetchall()
         total=self.db.execute("SELECT COUNT(*) FROM models WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ?",(like,like,like,like)).fetchone()[0]
         return rows,total
 
     def search_textures_page(self, term="", limit=1000, offset=0):
+        term=str(term or "").strip()
+        if not term:
+            rows=self.db.execute("SELECT * FROM textures ORDER BY folder,filename LIMIT ? OFFSET ?",(limit,offset)).fetchall()
+            total=self.db.execute("SELECT COUNT(*) FROM textures").fetchone()[0]
+            return rows,total
         like=f"%{term}%"
         rows=self.db.execute("SELECT * FROM textures WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ? OR dds_format LIKE ? ORDER BY folder,filename LIMIT ? OFFSET ?",(like,like,like,like,like,limit,offset)).fetchall()
         total=self.db.execute("SELECT COUNT(*) FROM textures WHERE filename LIKE ? OR folder LIKE ? OR relative_path LIKE ? OR sha256 LIKE ? OR dds_format LIKE ?",(like,like,like,like,like)).fetchone()[0]
