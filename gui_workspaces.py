@@ -715,7 +715,7 @@ class VehicleVariantsPage(QWidget):
         if result.get("report_csv"):
             lines += ["",f"CSV report: {result['report_csv']}",f"JSON report: {result.get('report_json','')}"]
         text.setPlainText("\n".join(lines));v.addWidget(text,1)
-        note=QLabel("Resolution uses background-normalized product evidence plus the decoded model body UV coverage. Ambiguous products remain unresolved and are excluded from rendering.")
+        note=QLabel("Resolution removes each texture's background, then compares the remaining outline with decoded model UV-island boundaries and verified stock-template outlines. Ambiguous products remain unresolved and are excluded from rendering.")
         note.setWordWrap(True);v.addWidget(note)
         close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
         self.status.setText(f"BG analysis complete • {counts.get('resolved',0):,} resolved • {counts.get('ambiguous',0):,} ambiguous • {counts.get('low_information',0):,} low-information • {counts.get('special',0):,} special/non-paintable")
