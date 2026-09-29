@@ -275,7 +275,7 @@ class MainWindow(QMainWindow):
         self.nav=QTreeWidget(); self.nav.setObjectName("nav"); self.nav.setHeaderHidden(True); self.nav.setIndentation(14)
         nav_groups=[
             ("Home",[("Dashboard",0)]),
-            ("Assets",[("Models",1),("Textures",2),("Visual Library",3),("Vehicle Variants",4)]),
+            ("Assets",[("Models",1),("Textures",2),("Visual Library",3),("Product Variants",4)]),
             ("Forensics",[("Intelligence",5),("Evidence",6),("Review Queue",7),("Compare",8)]),
             ("Tools",[("Convert",9),("Knowledge",10),("Scan & Analysis",11)]),
             ("System",[("Diagnostics",12),("Settings",13)]),
