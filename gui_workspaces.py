@@ -472,7 +472,7 @@ class VehicleVariantsPage(QWidget):
         select_row.setStretch(1,3);select_row.addStretch();b.addLayout(select_row)
         action_row=QHBoxLayout();self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2")
         self.engine=QComboBox();self.engine.addItems(["One-shot (safe)","Persistent (experimental)"]);self.engine.setCurrentIndex(0);self.engine.setMinimumWidth(165)
-        self.render_button=QPushButton("Feed Inspector — All Resolved");self.render_button.setToolTip("Render every missing resolver-approved product in the selected folder; unresolved products are skipped");self.render_button.clicked.connect(self.render_all_resolved)
+        self.render_button=QPushButton("Render All Resolved");self.render_button.setToolTip("Render every missing product with a verified model assignment in the selected folder; unresolved products are skipped");self.render_button.clicked.connect(self.render_all_resolved)
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete Resolved Renders");self.delete_all_button.clicked.connect(self.delete_all_resolved_variants)
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[];self.last_render_report=None;self.last_auto_report=None
@@ -659,8 +659,8 @@ class VehicleVariantsPage(QWidget):
         folder=self.folder_name();assignments=self._resolved_assignments();summary=resolution_summary(assignments)
         d=QDialog(self);d.setWindowTitle(f"Vehicle Resolution Preview — {folder}");d.resize(1180,780);v=QVBoxLayout(d)
         head=QLabel();head.setObjectName("title");v.addWidget(head)
-        note=QLabel("Only authoritative resolution is shown: exact numeric PID models and explicitly configured base models. ACONF presence/raw strings are evidence only; Inspector does not infer meaning from unknown config fields.");note.setWordWrap(True);v.addWidget(note)
-        controls=QHBoxLayout();flt=QComboBox();flt.addItems(["All","Resolved","Unresolved","Exact PID","Configured fallback"]);export=QPushButton("Export Resolution Report");details=QPushButton("ACONF Details")
+        note=QLabel("Resolution uses verified client evidence: exact numeric PID models and explicitly configured official default models. ACONF presence/raw strings are evidence only; unknown fields are not interpreted.");note.setWordWrap(True);v.addWidget(note)
+        controls=QHBoxLayout();flt=QComboBox();flt.addItems(["All","Resolved","Unresolved","Exact PID","Official default"]);export=QPushButton("Export Resolution Report");details=QPushButton("ACONF Details")
         controls.addWidget(QLabel("Filter"));controls.addWidget(flt);controls.addStretch();controls.addWidget(details);controls.addWidget(export);v.addLayout(controls)
         table=QTableWidget(0,7);table.setHorizontalHeaderLabels(["PID","State","Resolved model","Method","Textures","ACONF","Config strings"]);table.setSelectionBehavior(QAbstractItemView.SelectRows);table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         hh=table.horizontalHeader();hh.setSectionResizeMode(QHeaderView.Interactive)
@@ -669,7 +669,7 @@ class VehicleVariantsPage(QWidget):
         shown=[]
         def matches(x):
             mode=flt.currentText()
-            return mode=="All" or (mode=="Resolved" and x["state"]=="resolved") or (mode=="Unresolved" and x["state"]=="unresolved") or (mode=="Exact PID" and x["method"]=="exact PID model") or (mode=="Configured fallback" and x["method"]=="configured base model")
+            return mode=="All" or (mode=="Resolved" and x["state"]=="resolved") or (mode=="Unresolved" and x["state"]=="unresolved") or (mode=="Exact PID" and x["method"]=="exact PID model") or (mode=="Official default" and x["method"]=="official default model")
         def populate():
             nonlocal shown
             shown=[x for x in assignments if matches(x)];table.setRowCount(len(shown))
@@ -715,27 +715,50 @@ class VehicleVariantsPage(QWidget):
     def render_resolved_sample(self):
         if self.task and self.task.isRunning():
             QMessageBox.information(self,APP_NAME,"A render task is already running.");return
-        assignments=[x for x in self._resolved_assignments() if x["state"]=="resolved" and x["method"]=="exact PID model"]
+        assignments=[x for x in self._resolved_assignments() if x["state"]=="resolved" and x.get("model")]
         missing=[x for x in assignments if not cached_variant_thumbnail(x["model"]["path"],x["textures"])]
         target=int(self.sample_size.currentText())
         if not missing:
-            self.status.setText("No missing exact-PID resolved variants available for sampling.");return
+            self.status.setText("No missing resolved products are available for sampling.");return
+
+        def spread(items,count):
+            if count<=0 or not items:return []
+            if len(items)<=count:return list(items)
+            if count==1:return [items[len(items)//2]]
+            last=len(items)-1;idxs=[]
+            for i in range(count):
+                idx=int(round(i*last/(count-1)))
+                if idx not in idxs:idxs.append(idx)
+            return [items[i] for i in idxs]
+
+        exact=[x for x in missing if x["method"]=="exact PID model"]
+        defaults=[x for x in missing if x["method"]=="official default model"]
+        other=[x for x in missing if x["method"] not in ("exact PID model","official default model")]
         if len(missing)<=target:
             sample=list(missing)
+        elif defaults and exact:
+            default_slots=min(len(defaults),max(1,target//2))
+            sample=spread(defaults,default_slots)+spread(exact,target-default_slots)
+        elif defaults:
+            sample=spread(defaults,target)
+        elif exact:
+            sample=spread(exact,target)
         else:
-            # Deterministic spread across the full PID population avoids biasing
-            # validation toward only the earliest product IDs while remaining reproducible.
-            idxs=[];last=len(missing)-1
-            for i in range(target):
-                idx=int(round(i*last/(target-1)))
-                if idx not in idxs:idxs.append(idx)
-            sample=[missing[i] for i in idxs]
-        preview="\n".join(f"{x['pid']} → {x['model']['filename']}" for x in sample[:12])
+            sample=spread(other,target)
+        sample=sorted(sample,key=lambda x:int(x["pid"]) if str(x["pid"]).isdigit() else str(x["pid"]))
+
+        methods=resolution_summary(sample)["by_method"]
+        method_text=" • ".join(f"{k}: {v:,}" for k,v in sorted(methods.items()))
+        preview="\n".join(f"{x['pid']} → {x['model']['filename']} ({x['method']})" for x in sample[:12])
         if len(sample)>12:preview+=f"\n… plus {len(sample)-12} more"
-        answer=QMessageBox.question(self,"Render Verified Resolver Sample",f"Render a {len(sample)}-product spread sample from {len(missing):,} missing exact-PID products?\n\n{preview}\n\nNo fallback or unresolved product will be included. The exact sampled PID list will be exportable.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        answer=QMessageBox.question(
+            self,"Render Resolved Sample",
+            f"Render a {len(sample)}-product validation sample from {len(missing):,} missing resolved products?\n\n"
+            f"{method_text}\n\n{preview}\n\nUnresolved products are excluded. The sampled PID list and binding results are exportable.",
+            QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer!=QMessageBox.Yes:return
         self.progress.setRange(0,len(sample));self.progress.setValue(0);self.sample_button.setEnabled(False);self.cancel_button.setEnabled(True)
-        self.status.setText(f"Auto-rendering {len(sample)} exact-PID resolved products with one-shot Blender…")
+        self.status.setText(f"Rendering {len(sample):,} resolved sample products…")
         self.task=ResolvedVariantRenderTask(sample,int(self.workers.currentText()));self.task.progress.connect(self.on_progress);self.task.done.connect(self.resolved_sample_finished);self.task.start()
 
     def resolved_sample_finished(self,result):
@@ -744,7 +767,7 @@ class VehicleVariantsPage(QWidget):
         try:self.last_auto_report=write_render_report_files(self.last_render_report)
         except Exception:self.last_auto_report=None
         outputs=result.get("outputs",[])
-        d=QDialog(self);d.setWindowTitle("Resolved Render Sample");d.resize(1120,760);v=QVBoxLayout(d)
+        d=QDialog(self);d.setWindowTitle("Resolved Sample Results");d.resize(1120,760);v=QVBoxLayout(d)
         h=QLabel(f"{len(outputs):,} successful/cached • {result.get('failed',0):,} failed");h.setObjectName("title");v.addWidget(h)
         area=QScrollArea();area.setWidgetResizable(True);host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft)
         for i,x in enumerate(outputs):
@@ -760,7 +783,7 @@ class VehicleVariantsPage(QWidget):
         area.setWidget(host);v.addWidget(area,1)
         buttons=QHBoxLayout();export=QPushButton("Export Results");export.clicked.connect(lambda:self.export_last_render(d));buttons.addWidget(export);buttons.addStretch();bb=QDialogButtonBox(QDialogButtonBox.Close);bb.rejected.connect(d.reject);buttons.addWidget(bb);v.addLayout(buttons);d.exec()
         report_note=f" • auto-report: {self.last_auto_report['csv']}" if self.last_auto_report else ""
-        self.status.setText(f"Resolved sample complete • rendered {result.get('rendered',0):,} • failed {result.get('failed',0):,} • binding complete {result.get('binding_complete',0):,} • review {result.get('binding_review',0):,}{report_note}")
+        self.status.setText(f"Sample complete • rendered {result.get('rendered',0):,} • failed {result.get('failed',0):,} • binding complete {result.get('binding_complete',0):,} • review {result.get('binding_review',0):,}{report_note}")
 
     def export_last_render(self,parent=None):
         report=self.last_render_report
@@ -810,17 +833,17 @@ class VehicleVariantsPage(QWidget):
         cached=[x for x in assignments if cached_variant_thumbnail(x["model"]["path"],x["textures"])]
         missing=[x for x in assignments if not cached_variant_thumbnail(x["model"]["path"],x["textures"])]
         if not missing:
-            self.status.setText(f"Buffet already eaten • {len(cached):,} resolved products cached • {unresolved:,} unresolved skipped.");return
+            self.status.setText(f"All resolved products are already rendered • {len(cached):,} cached • {unresolved:,} unresolved skipped.");return
         methods=resolution_summary(missing)["by_method"]
         detail="\n".join(f"  {k}: {v:,}" for k,v in sorted(methods.items()))
-        msg=(f"Feed Inspector {len(missing):,} missing resolved products from {self.folder_name()}?\n\n"
+        msg=(f"Render {len(missing):,} missing resolved products from {self.folder_name()}?\n\n"
              f"Resolved total: {len(assignments):,}\nAlready rendered: {len(cached):,}\nTo render now: {len(missing):,}\n"
              f"Unresolved and skipped: {unresolved:,}\n\nResolution evidence:\n{detail}\n\n"
-             "Inspector will continue past individual failures, keep successful renders, and automatically save CSV + JSON run reports.")
-        answer=QMessageBox.question(self,"Feed Inspector — Full Resolved Folder",msg,QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+             "The batch will continue past individual failures, retain successful renders, and automatically save CSV and JSON reports.")
+        answer=QMessageBox.question(self,"Render All Resolved Products",msg,QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer!=QMessageBox.Yes:return
         self.progress.setRange(0,len(missing));self.progress.setValue(0);self.render_button.setEnabled(False);self.sample_button.setEnabled(False);self.cancel_button.setEnabled(True)
-        self.status.setText(f"Inspector is eating {len(missing):,} resolver-approved products • {unresolved:,} unresolved safely skipped…")
+        self.status.setText(f"Rendering {len(missing):,} products with verified model assignments • {unresolved:,} unresolved skipped…")
         self.task=ResolvedVariantRenderTask(missing,int(self.workers.currentText()));self.task.progress.connect(self.on_progress);self.task.done.connect(self.resolved_full_finished);self.task.start()
 
     def resolved_full_finished(self,result):
@@ -831,12 +854,12 @@ class VehicleVariantsPage(QWidget):
         except Exception:self.last_auto_report=None
         self.refresh()
         if not result.get("cancelled"):self.progress.setValue(self.progress.maximum())
-        status=("Stopped" if result.get("cancelled") else "Buffet complete")
+        status=("Render stopped" if result.get("cancelled") else "Render complete")
         report_note=f" • report {self.last_auto_report['csv']}" if self.last_auto_report else ""
         self.status.setText(f"{status} • completed {result.get('completed',0):,}/{result.get('total',0):,} • rendered {result.get('rendered',0):,} • failed {result.get('failed',0):,} • binding complete {result.get('binding_complete',0):,} • review {result.get('binding_review',0):,}{report_note}")
 
-        d=QDialog(self);d.setWindowTitle("Inspector Buffet Results");d.resize(760,480);v=QVBoxLayout(d)
-        title=QLabel("Inspector finished the folder" if not result.get("cancelled") else "Inspector stopped cleanly");title.setObjectName("title");v.addWidget(title)
+        d=QDialog(self);d.setWindowTitle("Resolved Render Results");d.resize(760,480);v=QVBoxLayout(d)
+        title=QLabel("Render batch completed" if not result.get("cancelled") else "Render batch stopped");title.setObjectName("title");v.addWidget(title)
         summary=QPlainTextEdit();summary.setReadOnly(True)
         lines=[
             f"Folder: {self.folder_name()}",
