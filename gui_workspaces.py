@@ -404,7 +404,9 @@ class ResolvedVariantRenderTask(QThread):
                     ok+=1;status="rendered"
                 else:
                     failed+=1;status="failed";failures.append({"pid":item["pid"],"model":item["model"]["filename"],"message":result.get("message") or "Render failed","returncode":result.get("returncode"),"log":result.get("log","")})
-                record={"pid":item["pid"],"state":item.get("state","resolved"),"method":item.get("method",""),"model":item["model"]["filename"],"model_path":item["model"]["path"],"textures":list(item["textures"]),"texture_count":len(item["textures"]),"status":status,"output":result.get("output") or "","cached":bool(result.get("cached")),"returncode":result.get("returncode"),"message":result.get("message") or ""}
+                bindings=result.get("texture_bindings") or []
+                bind_summary=next((b for b in bindings if b.get("summary")),{})
+                record={"pid":item["pid"],"state":item.get("state","resolved"),"method":item.get("method",""),"model":item["model"]["filename"],"model_path":item["model"]["path"],"textures":list(item["textures"]),"texture_count":len(item["textures"]),"status":status,"output":result.get("output") or "","cached":bool(result.get("cached")),"returncode":result.get("returncode"),"message":result.get("message") or "","binding_profile":result.get("binding_profile") or "","material_count":bind_summary.get("material_count",""),"color_material_count":bind_summary.get("color_material_count",""),"assigned_material_count":bind_summary.get("assigned_material_count",""),"unassigned_color_materials":bind_summary.get("unassigned_color_materials",[]),"unused_linked_textures":bind_summary.get("unused_linked_textures",[]),"texture_bindings":bindings}
                 records.append(record)
                 if result.get("success"):outputs.append({"pid":item["pid"],"model":item["model"],"textures":item["textures"],"output":result.get("output"),"cached":bool(result.get("cached"))})
                 elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
@@ -727,9 +729,9 @@ class VehicleVariantsPage(QWidget):
                 if not path.lower().endswith(".csv"):path += ".csv"
                 with open(path,"w",newline="",encoding="utf-8-sig") as fh:
                     w=csv.writer(fh)
-                    w.writerow(["folder","scope","created","pid","status","resolution_method","model","model_path","texture_count","textures","render_output","cached","returncode","message"])
+                    w.writerow(["folder","scope","created","pid","status","resolution_method","model","model_path","binding_profile","material_count","color_material_count","assigned_material_count","unassigned_color_materials","unused_linked_textures","texture_count","textures","render_output","cached","returncode","message"])
                     for x in records:
-                        w.writerow([folder,scope,report.get("created",""),x.get("pid",""),x.get("status",""),x.get("method",""),x.get("model",""),x.get("model_path",""),x.get("texture_count",0)," | ".join(x.get("textures",[])),x.get("output",""),x.get("cached",False),x.get("returncode",""),x.get("message","")])
+                        w.writerow([folder,scope,report.get("created",""),x.get("pid",""),x.get("status",""),x.get("method",""),x.get("model",""),x.get("model_path",""),x.get("binding_profile",""),x.get("material_count",""),x.get("color_material_count",""),x.get("assigned_material_count","")," | ".join(x.get("unassigned_color_materials",[]))," | ".join(x.get("unused_linked_textures",[])),x.get("texture_count",0)," | ".join(x.get("textures",[])),x.get("output",""),x.get("cached",False),x.get("returncode",""),x.get("message","")])
             self.status.setText(f"Exported {len(records):,} render result records • {path}")
         except Exception as exc:
             QMessageBox.critical(parent or self,APP_NAME,f"Render result export failed:\n{exc}")
@@ -854,11 +856,16 @@ class VehicleVariantsPage(QWidget):
     def open_textures(self,paths):
         d=QDialog(self);d.setWindowTitle("Texture Set");d.resize(900,650);lay=QGridLayout(d)
         present={self.product_id(Path(p).name)[1] for p in paths if self.product_id(Path(p).name)}
-        roles={1:"Body"}
-        roles.update({2:"Window Color",3:"Window Transparency"} if (2 in present and 3 in present and 4 not in present) else {3:"Window Color",4:"Window Transparency"})
+        is_bg=self.folder_name().lower()=="bg"
+        roles={}
+        if is_bg:
+            roles={1:"Body"}
+            roles.update({2:"Window Color",3:"Window Transparency"} if (2 in present and 3 in present and 4 not in present) else {3:"Window Color",4:"Window Transparency"})
         for i,p in enumerate(paths):
             parsed=self.product_id(Path(p).name);slot=parsed[1] if parsed else None
-            subtitle=f"_{slot} • {roles.get(slot,'Texture')}" if slot else ""
+            if slot:
+                subtitle=f"_{slot} • {roles.get(slot,'BG Texture')}" if is_bg else f"Texture slot _{slot} • model-driven"
+            else:subtitle=""
             lay.addWidget(TextureThumb(p,Path(p).name,subtitle),i//3,i%3)
         d.exec()
     def render_missing(self):
