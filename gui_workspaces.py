@@ -643,8 +643,11 @@ class VehicleVariantsPage(QWidget):
         if self.bg_task and self.bg_task.isRunning():
             QMessageBox.information(self,APP_NAME,"BG family analysis is already running.");return
         models=self.db.models_in_folder("bg",10000)
-        self.bg_analyze_button.setEnabled(False);self.progress.setRange(0,0)
-        self.status.setText(f"Analyzing {len(self.sets):,} BG product textures against verified model/template families…")
+        self.bg_analyze_button.setEnabled(False)
+        for control in (self.sample_button,self.render_button,self.delete_all_button,self.resolve_button):
+            control.setEnabled(False)
+        self.progress.setRange(0,0)
+        self.status.setText(f"Analyzing {len(self.sets):,} BG product textures against decoded model UV families… Existing results remain read-only until analysis completes.")
         self.bg_task=Task(analyze_bg_families,self.sets,models)
         self.bg_task.done.connect(self.bg_family_analysis_finished)
         self.bg_task.failed.connect(self.bg_family_analysis_failed)
@@ -652,11 +655,15 @@ class VehicleVariantsPage(QWidget):
 
     def bg_family_analysis_failed(self,message):
         self.progress.setRange(0,100);self.progress.setValue(0);self.bg_analyze_button.setEnabled(True);self.bg_task=None
+        for control in (self.sample_button,self.render_button,self.delete_all_button,self.resolve_button):
+            control.setEnabled(True)
         QMessageBox.critical(self,APP_NAME,f"BG family analysis failed:\n{message}")
         self.status.setText("BG family analysis failed.")
 
     def bg_family_analysis_finished(self,result):
         self.progress.setRange(0,100);self.progress.setValue(100);self.bg_analyze_button.setEnabled(True);self.bg_task=None
+        for control in (self.sample_button,self.render_button,self.delete_all_button,self.resolve_button):
+            control.setEnabled(True)
         if not result.get("ok"):
             QMessageBox.warning(self,APP_NAME,result.get("message") or "BG family analysis did not produce a usable result.")
             self.status.setText("BG family analysis did not produce a usable result.");return
