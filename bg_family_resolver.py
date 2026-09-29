@@ -14,7 +14,7 @@ from there_texture_decoder import open_texture_image
 from there_model_decoder import decode_model
 
 
-CACHE_VERSION = 9
+CACHE_VERSION = 10
 CACHE_PATH = Path("cache/bg_family_resolution.json")
 REPORT_ROOT = Path("reports/bg_family_analysis")
 QUANTILES = (0.70, 0.80, 0.85)
@@ -24,6 +24,9 @@ RELAXED_MIN_SCORE = 0.16
 RELAXED_MIN_MARGIN = 0.015
 CORROBORATED_MIN_SCORE = 0.17
 CORROBORATED_MIN_MARGIN = 0.020
+SPARSE_MAX_FOREGROUND_FRACTION = 0.15
+SPARSE_MIN_BORDER_BACKGROUND_SHARE = 0.90
+SPARSE_MAX_OUTLINE_FRACTION = 0.30
 BACKGROUND_TOLERANCE = 38
 UV_OUTLINE_WEIGHT = 0.55
 TEMPLATE_OUTLINE_WEIGHT = 0.30
@@ -33,7 +36,7 @@ MIN_BORDER_BACKGROUND_SHARE = 0.15
 MIN_FOREGROUND_FRACTION = 0.04
 MAX_FOREGROUND_FRACTION = 0.96
 MIN_TEXTURE_STDDEV = 5.0
-ANALYSIS_ALGORITHM = "background-removed-uv-outline-v3-diagnostics"
+ANALYSIS_ALGORITHM = "background-removed-uv-outline-v4-primary-agreement"
 
 
 def _slot(path):
@@ -464,9 +467,20 @@ def analyze_bg_families(product_sets,models,rules=None):
         template_winner=max(template_outline_scores,key=template_outline_scores.get)
         primary_agree=(uv_winner==winner and template_winner==winner)
 
-        strict_clear=(score80>=MIN_WINNER_SCORE and margin>=MIN_MARGIN and vote_count>=2)
-        outline_clear=(primary_agree and score80>=RELAXED_MIN_SCORE and margin>=RELAXED_MIN_MARGIN)
-        corroborated_clear=(vote_count>=3 and score80>=CORROBORATED_MIN_SCORE and margin>=CORROBORATED_MIN_MARGIN)
+        # Reviewed validation showed that winner margin is a poor confidence gate
+        # for closely related BG families. When the independently derived model-UV
+        # outline and stock-template outline choose the same family, accept that
+        # agreement without a minimum separation margin. Keep a conservative sparse
+        # evidence hold for textures like known regression PID 216317831, where a
+        # mostly-background image can accidentally resemble the wrong family.
+        sparse_evidence=(
+            candidate_occ["foreground_fraction"]<=SPARSE_MAX_FOREGROUND_FRACTION and
+            candidate_occ["border_background_share"]>=SPARSE_MIN_BORDER_BACKGROUND_SHARE and
+            candidate_occ["outline_fraction"]<=SPARSE_MAX_OUTLINE_FRACTION
+        )
+        strict_clear=(score80>=MIN_WINNER_SCORE and margin>=MIN_MARGIN and vote_count>=2 and not sparse_evidence)
+        outline_clear=(primary_agree and score80>=RELAXED_MIN_SCORE and not sparse_evidence)
+        corroborated_clear=(vote_count>=3 and score80>=CORROBORATED_MIN_SCORE and margin>=CORROBORATED_MIN_MARGIN and not sparse_evidence)
 
         if strict_clear:
             confidence_tier="strict"
@@ -492,15 +506,17 @@ def analyze_bg_families(product_sets,models,rules=None):
         if strict_clear:
             decision_reason="accepted: strict score/margin + 2 votes"
         elif outline_clear:
-            decision_reason="accepted: UV + template outlines agree"
+            decision_reason="accepted: UV + template outlines agree; margin diagnostic only"
         elif corroborated_clear:
             decision_reason="accepted: 3+ independent signals corroborate"
         else:
             blockers=[]
+            if sparse_evidence:
+                blockers.append("sparse evidence hold")
             if score80<RELAXED_MIN_SCORE:
                 blockers.append(f"score {score80:.4f} < relaxed {RELAXED_MIN_SCORE:.4f}")
             if margin<RELAXED_MIN_MARGIN:
-                blockers.append(f"margin {margin:.4f} < relaxed {RELAXED_MIN_MARGIN:.4f}")
+                blockers.append(f"margin {margin:.4f} < legacy relaxed {RELAXED_MIN_MARGIN:.4f} (diagnostic only when primary outlines agree)")
             if not primary_agree:
                 blockers.append(f"primary outlines disagree ({uv_winner} vs {template_winner})")
             if vote_count<3:
@@ -533,7 +549,7 @@ def analyze_bg_families(product_sets,models,rules=None):
             "state":state,"method":method,"model":model,
             "family_model":winner,"template":anchor["template"],"paintable":anchor["paintable"],
             "score":round(score80,6),"margin":round(margin,6),"votes":vote_count,
-            "confidence_tier":confidence_tier,"evidence_confidence":round(evidence_confidence,6),"evidence_band":evidence_band,"primary_agree":primary_agree,
+            "confidence_tier":confidence_tier,"evidence_confidence":round(evidence_confidence,6),"evidence_band":evidence_band,"sparse_evidence":sparse_evidence,"primary_agree":primary_agree,
             "uv_winner":uv_winner,"template_winner":template_winner,
             "decision_reason":decision_reason,
             "strict_score_gap":round(strict_score_gap,6),"strict_margin_gap":round(strict_margin_gap,6),
@@ -560,6 +576,9 @@ def analyze_bg_families(product_sets,models,rules=None):
             "relaxed_min_score":RELAXED_MIN_SCORE,"relaxed_min_margin":RELAXED_MIN_MARGIN,
             "corroborated_min_score":CORROBORATED_MIN_SCORE,"corroborated_min_margin":CORROBORATED_MIN_MARGIN,
             "background_tolerance":BACKGROUND_TOLERANCE,
+            "sparse_max_foreground_fraction":SPARSE_MAX_FOREGROUND_FRACTION,
+            "sparse_min_border_background_share":SPARSE_MIN_BORDER_BACKGROUND_SHARE,
+            "sparse_max_outline_fraction":SPARSE_MAX_OUTLINE_FRACTION,
             "uv_outline_weight":UV_OUTLINE_WEIGHT,"template_outline_weight":TEMPLATE_OUTLINE_WEIGHT,
             "uv_precision_weight":UV_PRECISION_WEIGHT,"occupancy_weight":OCCUPANCY_WEIGHT,
             "min_texture_stddev":MIN_TEXTURE_STDDEV,
@@ -589,7 +608,7 @@ def _write_report(payload):
         w=csv.writer(fh)
         models=[a["model"] for a in payload.get("anchors",[])]
         w.writerow([
-            "pid","state","method","confidence_tier","evidence_confidence","evidence_band","decision_reason",
+            "pid","state","method","confidence_tier","evidence_confidence","evidence_band","sparse_evidence","decision_reason",
             "primary_agree","uv_winner","template_winner","family_model","template",
             "score","margin","votes",
             "strict_score_gap","strict_margin_gap",
@@ -606,7 +625,7 @@ def _write_report(payload):
         for pid,x in sorted(payload.get("assignments",{}).items(),key=lambda kv:int(kv[0]) if kv[0].isdigit() else kv[0]):
             occ=x.get("occupancy") or {}
             w.writerow([
-                pid,x.get("state"),x.get("method"),x.get("confidence_tier",""),x.get("evidence_confidence",""),x.get("evidence_band",""),x.get("decision_reason",""),
+                pid,x.get("state"),x.get("method"),x.get("confidence_tier",""),x.get("evidence_confidence",""),x.get("evidence_band",""),x.get("sparse_evidence",""),x.get("decision_reason",""),
                 x.get("primary_agree",""),x.get("uv_winner",""),x.get("template_winner",""),
                 x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),
                 x.get("strict_score_gap",""),x.get("strict_margin_gap",""),
