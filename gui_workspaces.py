@@ -413,23 +413,29 @@ class ResolvedVariantRenderTask(QThread):
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
         super().__init__();self.db=db;self.task=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
-        h=QLabel("Vehicle Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Resolve product models from client evidence, inspect folder configuration, and build true 3D variant previews."))
-        # Two-row responsive toolbar: selection on top, render actions below.
-        select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(210);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder");self.model_box=QComboBox();self.model_box.setMinimumWidth(180);self.model_box.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.template_box=QComboBox();self.template_box.setMinimumWidth(220);self.template_box.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.template_box.setToolTip("Reference template used to classify PID texture layouts");load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
+        h=QLabel("Product Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Resolve product models from client evidence and render verified product/model combinations without manual model guessing."))
+        # Keep legacy model/template selectors internally for BG research, but the
+        # normal workflow is now folder -> resolver -> render.
+        select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(260);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder")
+        self.model_box=QComboBox();self.template_box=QComboBox()
+        load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
+        self.view_filter=QComboBox();self.view_filter.addItems(["Rendered","Missing resolved","Unresolved","All resolved"]);self.view_filter.currentIndexChanged.connect(self.refresh)
         self.populate_folders()
-        for w in (QLabel("Folder"),self.folder,load,QLabel("Vehicle model"),self.model_box,QLabel("Template"),self.template_box):select_row.addWidget(w)
-        select_row.setStretch(1,2);select_row.setStretch(4,2);select_row.setStretch(6,2);b.addLayout(select_row)
-        action_row=QHBoxLayout();self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2");self.engine=QComboBox();self.engine.addItems(["Persistent (fast)","One-shot (safe)"]);self.engine.setMinimumWidth(140);render=QPushButton("Render Classified Variants");render.clicked.connect(self.render_missing);self.render_button=render
+        for w in (QLabel("Folder"),self.folder,load,QLabel("View"),self.view_filter):select_row.addWidget(w)
+        select_row.setStretch(1,3);select_row.addStretch();b.addLayout(select_row)
+        action_row=QHBoxLayout();self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2")
+        self.engine=QComboBox();self.engine.addItems(["One-shot (safe)","Persistent (experimental)"]);self.engine.setCurrentIndex(0);self.engine.setMinimumWidth(165)
+        self.render_button=QPushButton("Render Resolved Missing");self.render_button.clicked.connect(self.render_all_resolved)
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
-        self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
+        self.delete_all_button=QPushButton("Delete Resolved Renders");self.delete_all_button.clicked.connect(self.delete_all_resolved_variants)
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
         uv_analyze=QPushButton("Analyze UV Families");uv_analyze.clicked.connect(self.analyze_uv_families);self.uv_analyze_button=uv_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
         sample=QPushButton("Render 10 Resolved");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
-        for w in (QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,config,uv_analyze,resolve,sample,render,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
+        for w in (QLabel("Workers"),self.workers,config,uv_analyze,resolve,sample,self.render_button,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
-        self.compatibility=QLabel("Select the correct model/template before rendering.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
+        self.compatibility=QLabel("Resolver status: authoritative PID/model matches and explicit rules only.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.template_box.currentIndexChanged.connect(self.refresh);self.load_folder()
     def folder_name(self):
