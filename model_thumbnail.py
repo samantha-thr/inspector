@@ -131,7 +131,7 @@ def render_model_thumbnail(model_path,linked_textures=None,size=512,force=False)
     if not blender:return {"success":False,"message":"Blender not detected"}
     decoded=decode_model(model_path)
     obj=WORK_DIR/f"{thumbnail_key(model_path)}.obj"
-    export_obj(decoded,obj,linked_textures or [],include_collision=False)
+    export_info=export_obj(decoded,obj,linked_textures or [],include_collision=False)
     script=_script(obj,out,size)
     proc=subprocess.run([blender,"--background","--factory-startup","--python",str(script)],capture_output=True,text=True,timeout=180)
     log=(proc.stdout or "")+"\
@@ -219,7 +219,7 @@ except Exception as e:
         time.sleep(.10)
     stdout,stderr=proc.communicate()
     log=(stdout or "")+"\n"+(stderr or "");success=proc.returncode==0 and out.exists()
-    return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:]}
+    return {"success":success,"cached":False,"output":str(out),"returncode":proc.returncode,"log":log[-8000:],"binding_profile":export_info.get("binding_profile"),"texture_bindings":export_info.get("texture_bindings",[])}
 
 
 class PersistentVariantWorker:
