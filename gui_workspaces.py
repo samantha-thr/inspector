@@ -8,7 +8,7 @@ from PySide6.QtWidgets import *
 from config import APP_NAME, DATABASE_PATH, DEFAULT_SCAN_PATH
 from there_texture_decoder import open_texture_image
 from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_conversion_job, inspect_conversion_source, prepare_conversion_job
-from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION, cached_variant_thumbnail, render_model_variant, remove_cached_variant, PersistentVariantWorker
+from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION, cached_variant_thumbnail, render_model_variant, remove_cached_variant, PersistentVariantWorker, render_cache_stats, cleanup_render_work_cache
 from uv_intelligence import analyze_model_uv, compare_uv_fingerprints
 from model_forensics import analyze_model_rows
 from vehicle_resolver import resolve_products, resolution_summary, enrich_assignments, folder_configuration
@@ -1262,8 +1262,12 @@ class DiagnosticsPage(QWidget):
             from PIL import features
             checks.append(("Pillow","OK","Image preview engine available"))
         except Exception as e:checks.append(("Pillow","FAIL",str(e)))
-        cache=Path("cache/model_thumbnails");n=len(list(cache.glob("*.png"))) if cache.exists() else 0
-        failures=thumbnail_failure_count();checks.append(("Visual cache","OK" if not failures else "WARN",f"{n:,} cached model renders • {failures:,} logged render failures"))
+        stats=render_cache_stats();mt=stats["model_thumbnails"];pv=stats["product_variants"];rw=stats["render_work"]
+        failures=thumbnail_failure_count()
+        checks.append(("Visual cache","OK" if not failures else "WARN",f"{mt['files']:,} model thumbnail files • {failures:,} logged render failures"))
+        checks.append(("Product variant cache","OK",f"{pv['files']:,} files • {pv['bytes']/1024/1024:.1f} MB"))
+        work_status="WARN" if rw["bytes"]>500*1024*1024 else "OK"
+        checks.append(("Temporary render work",work_status,f"{rw['files']:,} files • {rw['bytes']/1024/1024:.1f} MB • safe cleanup available in Settings"))
         try:
             self.db.db.execute("PRAGMA quick_check").fetchone();checks.append(("SQLite quick check","OK","Database responded successfully"))
         except Exception as e:checks.append(("SQLite quick check","FAIL",str(e)))
@@ -1273,11 +1277,16 @@ class DiagnosticsPage(QWidget):
 
 class SettingsPage(QWidget):
     def __init__(self,db=None):
-        super().__init__();self.db=db;self.settings=QSettings("ThereInspector","ThereInspector");b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Settings");h.setObjectName("title");b.addWidget(h);f=QFormLayout();self.resource=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH));self.blender=QLineEdit(self.settings.value("blender_path",""));f.addRow("Resource folder",self.resource);f.addRow("Blender executable",self.blender);f.addRow("Database",QLabel(str(DATABASE_PATH)));b.addLayout(f);buttons=QHBoxLayout();save=QPushButton("Save Settings");save.clicked.connect(self.save);export=QPushButton("Export Diagnostic Snapshot");export.clicked.connect(self.export_snapshot);clear=QPushButton("Clear Model Thumbnail Cache");clear.clicked.connect(self.clear_cache);buttons.addWidget(save);buttons.addWidget(export);buttons.addWidget(clear);buttons.addStretch();b.addLayout(buttons);b.addStretch()
+        super().__init__();self.db=db;self.settings=QSettings("ThereInspector","ThereInspector");b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Settings");h.setObjectName("title");b.addWidget(h);f=QFormLayout();self.resource=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH));self.blender=QLineEdit(self.settings.value("blender_path",""));f.addRow("Resource folder",self.resource);f.addRow("Blender executable",self.blender);f.addRow("Database",QLabel(str(DATABASE_PATH)));b.addLayout(f);buttons=QHBoxLayout();save=QPushButton("Save Settings");save.clicked.connect(self.save);export=QPushButton("Export Diagnostic Snapshot");export.clicked.connect(self.export_snapshot);clean=QPushButton("Clean Temporary Render Files");clean.clicked.connect(self.clean_render_work);clear=QPushButton("Clear Model Thumbnail Cache");clear.clicked.connect(self.clear_cache);buttons.addWidget(save);buttons.addWidget(export);buttons.addWidget(clean);buttons.addWidget(clear);buttons.addStretch();b.addLayout(buttons);b.addStretch()
     def save(self):
         self.settings.setValue("resource_path",self.resource.text());self.settings.setValue("blender_path",self.blender.text())
         if self.blender.text().strip():os.environ["BLENDER_EXE"]=self.blender.text().strip()
         QMessageBox.information(self,APP_NAME,"Settings saved.")
+
+    def clean_render_work(self):
+        result=cleanup_render_work_cache(30)
+        mb=result.get("bytes",0)/1024/1024
+        QMessageBox.information(self,APP_NAME,f"Removed {result.get('files',0):,} temporary render files older than 30 minutes ({mb:.1f} MB).\n\nCached product renders and model thumbnails were not removed.")
 
     def clear_cache(self):
         n=purge_thumbnail_cache(); QMessageBox.information(self,APP_NAME,f"Removed {n:,} cached model thumbnails.")
