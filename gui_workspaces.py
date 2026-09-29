@@ -37,6 +37,42 @@ def texture_diff_pixmap(path_a,path_b,max_w=900,max_h=220):
         return QPixmap.fromImage(q).scaled(max_w,max_h,Qt.KeepAspectRatio,Qt.SmoothTransformation),similarity
     except Exception:return QPixmap(),None
 
+RENDER_REPORT_COLUMNS=[
+    "folder","scope","created","pid","status","resolution_method","model","model_path",
+    "binding_profile","material_count","color_material_count","assigned_material_count",
+    "map_target_count","assigned_map_count","unassigned_maps","unassigned_color_materials",
+    "unused_linked_textures","texture_count","textures","render_output","cached","returncode","message"
+]
+
+def _render_report_row(report,x):
+    return [
+        report.get("folder",""),report.get("scope",""),report.get("created",""),x.get("pid",""),
+        x.get("status",""),x.get("method",""),x.get("model",""),x.get("model_path",""),
+        x.get("binding_profile",""),x.get("material_count",""),x.get("color_material_count",""),
+        x.get("assigned_material_count",""),x.get("map_target_count",""),x.get("assigned_map_count",""),
+        " | ".join(x.get("unassigned_maps",[]))," | ".join(x.get("unassigned_color_materials",[])),
+        " | ".join(x.get("unused_linked_textures",[])),x.get("texture_count",0),
+        " | ".join(x.get("textures",[])),x.get("output",""),x.get("cached",False),
+        x.get("returncode",""),x.get("message","")
+    ]
+
+def write_render_report_files(report):
+    """Persist every resolver render run locally as CSV + JSON."""
+    folder=str(report.get("folder") or "products")
+    safe_folder=re.sub(r"[^A-Za-z0-9_.-]+","_",folder).strip("_") or "products"
+    scope=str(report.get("scope") or "render")
+    stamp=time.strftime("%Y%m%d-%H%M%S")
+    root=Path(__file__).resolve().parent/"reports"/"product_variants"/safe_folder
+    root.mkdir(parents=True,exist_ok=True)
+    base=root/f"{stamp}-{scope}"
+    result=report.get("result") or {};records=result.get("records") or []
+    json_path=base.with_suffix(".json");csv_path=base.with_suffix(".csv")
+    json_path.write_text(json.dumps(report,indent=2),encoding="utf-8")
+    with open(csv_path,"w",newline="",encoding="utf-8-sig") as fh:
+        w=csv.writer(fh);w.writerow(RENDER_REPORT_COLUMNS)
+        for x in records:w.writerow(_render_report_row(report,x))
+    return {"csv":str(csv_path),"json":str(json_path)}
+
 def reveal(p):
     try: subprocess.Popen(["explorer","/select,",str(Path(p))]) if os.name=="nt" else None
     except Exception: pass
