@@ -11,6 +11,7 @@ from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_con
 from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION, cached_variant_thumbnail, render_model_variant, remove_cached_variant, PersistentVariantWorker
 from uv_intelligence import analyze_model_uv, compare_uv_fingerprints
 from model_forensics import analyze_model_rows
+from vehicle_resolver import resolve_products, resolution_summary
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -391,7 +392,8 @@ class VehicleVariantsPage(QWidget):
         self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
         uv_analyze=QPushButton("Analyze UV Families");uv_analyze.clicked.connect(self.analyze_uv_families);self.uv_analyze_button=uv_analyze
-        for w in (QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,uv_analyze,render,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
+        resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
+        for w in (QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,uv_analyze,resolve,render,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
         self.compatibility=QLabel("Select the correct model/template before rendering.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
@@ -521,6 +523,24 @@ class VehicleVariantsPage(QWidget):
         elif self.model:
             self.compatibility.setText(f"Choose the reference template that belongs to {self.model['filename']}. Inspector will not infer template→model relationships.")
         self.status.setText(f"{len(self.sets):,} PID sets • {scored:,} analyzed • {len(compatible):,} match selected template • {unscored:,} could not be scored • {cached:,} rendered")
+    def show_resolution_preview(self):
+        folder=self.folder_name();models=self.db.models_in_folder(folder,10000)
+        assignments=resolve_products(folder,models,self.sets);summary=resolution_summary(assignments)
+        d=QDialog(self);d.setWindowTitle(f"Vehicle Resolution Preview — {folder}");d.resize(1050,720);v=QVBoxLayout(d)
+        head=QLabel(f"{len(assignments):,} product sets • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved");head.setObjectName("title");v.addWidget(head)
+        note=QLabel("This preview uses only authoritative rules: exact PID model matches and explicitly configured base models. Unresolved products are not guessed and cannot be bulk-rendered.");note.setWordWrap(True);v.addWidget(note)
+        table=QTableWidget(len(assignments),5);table.setHorizontalHeaderLabels(["PID","State","Resolved model","Method","Textures"]);table.setSelectionBehavior(QAbstractItemView.SelectRows);table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        for r,x in enumerate(assignments):
+            vals=(x["pid"],x["state"].upper(),x["model"]["filename"] if x["model"] else "—",x["method"],str(len(x["textures"])))
+            for c,val in enumerate(vals):table.setItem(r,c,QTableWidgetItem(str(val)))
+        hh=table.horizontalHeader();hh.setSectionResizeMode(QHeaderView.Interactive);table.setColumnWidth(0,150);table.setColumnWidth(1,120);table.setColumnWidth(2,220);table.setColumnWidth(3,330);table.setColumnWidth(4,90);table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);v.addWidget(table,1)
+        by=QPlainTextEdit();by.setReadOnly(True);by.setMaximumHeight(130)
+        lines=["Resolved by model:"]+[f"  {k}: {n:,}" for k,n in sorted(summary["by_model"].items())]
+        lines+=["","Resolution methods:"]+[f"  {k}: {n:,}" for k,n in sorted(summary["by_method"].items())]
+        by.setPlainText("\n".join(lines));v.addWidget(by)
+        close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
+        self.status.setText(f"Resolution preview • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • no guesses")
+
     def analyze_uv_families(self):
         """Decode every model in the selected folder and group exact LOD0 UV layouts."""
         folder=self.folder_name();models=self.db.models_in_folder(folder,10000)
