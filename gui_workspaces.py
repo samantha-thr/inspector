@@ -698,6 +698,7 @@ class VehicleVariantsPage(QWidget):
 
     def resolved_sample_finished(self,result):
         self.sample_button.setEnabled(True);self.cancel_button.setEnabled(False);self.task=None;self.last_failures=result.get("failures",[]);self.failures_button.setEnabled(bool(self.last_failures))
+        self.last_render_report={"folder":self.folder_name(),"scope":"sample","created":time.strftime("%Y-%m-%d %H:%M:%S"),"result":result};self.export_render_button.setEnabled(True)
         outputs=result.get("outputs",[])
         d=QDialog(self);d.setWindowTitle("Resolved Render Sample");d.resize(1120,760);v=QVBoxLayout(d)
         h=QLabel(f"{len(outputs):,} successful/cached • {result.get('failed',0):,} failed");h.setObjectName("title");v.addWidget(h)
@@ -708,8 +709,30 @@ class VehicleVariantsPage(QWidget):
             else:im.setText("Preview unavailable")
             cv.addWidget(im);lab=QLabel(f"PID {x['pid']}\n{x['model']['filename']}");lab.setAlignment(Qt.AlignCenter);lab.setWordWrap(True);cv.addWidget(lab);grid.addWidget(card,i//4,i%4)
         if not outputs:grid.addWidget(QLabel("No successful renders."),0,0)
-        area.setWidget(host);v.addWidget(area,1);bb=QDialogButtonBox(QDialogButtonBox.Close);bb.rejected.connect(d.reject);v.addWidget(bb);d.exec()
+        area.setWidget(host);v.addWidget(area,1)
+        buttons=QHBoxLayout();export=QPushButton("Export Results");export.clicked.connect(lambda:self.export_last_render(d));buttons.addWidget(export);buttons.addStretch();bb=QDialogButtonBox(QDialogButtonBox.Close);bb.rejected.connect(d.reject);buttons.addWidget(bb);v.addLayout(buttons);d.exec()
         self.status.setText(f"Resolved sample complete • rendered {result.get('rendered',0):,} • cached {result.get('cached',0):,} • failed {result.get('failed',0):,}")
+
+    def export_last_render(self,parent=None):
+        report=self.last_render_report
+        if not report:return
+        folder=report.get("folder") or "products";scope=report.get("scope") or "render"
+        path,_=QFileDialog.getSaveFileName(parent or self,"Export Render Results",f"there-inspector-{folder}-{scope}-render-results.csv","CSV (*.csv);;JSON (*.json)")
+        if not path:return
+        result=report.get("result") or {};records=result.get("records") or []
+        try:
+            if path.lower().endswith(".json"):
+                Path(path).write_text(json.dumps(report,indent=2),encoding="utf-8")
+            else:
+                if not path.lower().endswith(".csv"):path += ".csv"
+                with open(path,"w",newline="",encoding="utf-8-sig") as fh:
+                    w=csv.writer(fh)
+                    w.writerow(["folder","scope","created","pid","status","resolution_method","model","model_path","texture_count","textures","render_output","cached","returncode","message"])
+                    for x in records:
+                        w.writerow([folder,scope,report.get("created",""),x.get("pid",""),x.get("status",""),x.get("method",""),x.get("model",""),x.get("model_path",""),x.get("texture_count",0)," | ".join(x.get("textures",[])),x.get("output",""),x.get("cached",False),x.get("returncode",""),x.get("message","")])
+            self.status.setText(f"Exported {len(records):,} render result records • {path}")
+        except Exception as exc:
+            QMessageBox.critical(parent or self,APP_NAME,f"Render result export failed:\n{exc}")
 
     def delete_resolved_variant(self,item):
         if not item.get("model"):return
