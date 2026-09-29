@@ -61,9 +61,9 @@ def resolve_products(folder,models,product_sets):
         if pid in exact:
             model=exact[pid];method="exact PID model";state="resolved"
         elif base and base["filename"].lower() not in nonpaintable:
-            model=base;method="configured base model";state="resolved"
+            model=base;method="official default model";state="resolved"
         else:
-            model=None;method="no authoritative model rule";state="unresolved"
+            model=None;method="no verified model assignment";state="unresolved"
         assignments.append({"pid":pid,"textures":paths,"model":model,"method":method,"state":state,"origin":"product"})
     return assignments
 
