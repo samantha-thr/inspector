@@ -8,19 +8,21 @@ import re
 import time
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageFilter, ImageStat
+from PIL import Image, ImageChops, ImageFilter, ImageStat, ImageDraw
 
 from there_texture_decoder import open_texture_image
+from there_model_decoder import decode_model
 
 
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 CACHE_PATH = Path("cache/bg_family_resolution.json")
 REPORT_ROOT = Path("reports/bg_family_analysis")
 QUANTILES = (0.70, 0.80, 0.85)
 MIN_WINNER_SCORE = 0.18
 MIN_MARGIN = 0.035
 BACKGROUND_TOLERANCE = 38
-OCCUPANCY_WEIGHT = 0.75
+OCCUPANCY_WEIGHT = 0.25
+MODEL_UV_WEIGHT = 0.75
 MIN_BORDER_BACKGROUND_SHARE = 0.15
 MIN_FOREGROUND_FRACTION = 0.04
 MAX_FOREGROUND_FRACTION = 0.96
@@ -141,6 +143,70 @@ def _foreground_occupancy(path, size=256, feature_size=64):
         "stddev":round(stddev,6),
         "usable":usable,
         "low_information":stddev<MIN_TEXTURE_STDDEV,
+    }
+
+
+def _texture_key(value):
+    name=str(value or "").replace("\\","/").rsplit("/",1)[-1].lower()
+    changed=True
+    while changed:
+        changed=False
+        for ext in (".dds",".png",".jpg",".jpeg",".tga",".bmp"):
+            if name.endswith(ext):
+                name=name[:-len(ext)];changed=True
+    return name
+
+
+def _model_body_uv_mask(model_path, template_name, size=256, feature_size=64):
+    """Build a filled UV coverage mask from the model material that owns the stock body map."""
+    model=decode_model(model_path)
+    wanted=_texture_key(template_name)
+    material_ids=[]
+    for material in model.materials:
+        color_ref=material.texture_maps.get(0)
+        if color_ref and _texture_key(color_ref)==wanted:
+            material_ids.append(material.index)
+    if not material_ids:
+        for material in model.materials:
+            if any(_texture_key(ref)==wanted for ref in material.texture_maps.values()):
+                material_ids.append(material.index)
+    if not material_ids:
+        raise ValueError(f"{Path(model_path).name}: body material for {template_name} was not found")
+
+    mask=Image.new("L",(size,size),0);draw=ImageDraw.Draw(mask);triangles=0
+    if not model.lods:
+        raise ValueError(f"{Path(model_path).name}: no LODs")
+    for mesh in model.lods[0].meshes:
+        if mesh.material_index not in material_ids:continue
+        verts=mesh.vertices
+        for i in range(0,len(mesh.indices)-2,3):
+            ids=mesh.indices[i:i+3]
+            if any(idx>=len(verts) or verts[idx].uv0 is None for idx in ids):continue
+            pts=[]
+            for idx in ids:
+                u,v=verts[idx].uv0
+                pts.append((round(u*(size-1)),round((1.0-v)*(size-1))))
+            draw.polygon(pts,fill=255);triangles+=1
+    small=mask.resize((feature_size,feature_size),Image.Resampling.BOX)
+    bits=bytes(1 if p>=64 else 0 for p in small.getdata())
+    area=sum(bits)
+    if triangles==0 or area==0:
+        raise ValueError(f"{Path(model_path).name}: body material has no usable UV triangles")
+    return {"mask":bits,"triangles":triangles,"area":area,"material_ids":material_ids}
+
+
+def _mask_metrics(a: bytes,b: bytes):
+    inter=union=ac=bc=0
+    for x,y in zip(a,b):
+        if x:ac+=1
+        if y:bc+=1
+        if x or y:union+=1
+        if x and y:inter+=1
+    return {
+        "iou":inter/union if union else 0.0,
+        "dice":(2.0*inter/(ac+bc)) if (ac+bc) else 0.0,
+        "precision":inter/ac if ac else 0.0,
+        "coverage":inter/bc if bc else 0.0,
     }
 
 
