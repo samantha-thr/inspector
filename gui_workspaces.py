@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, os, subprocess, time, threading
+import csv, json, os, subprocess, time, threading
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from pathlib import Path
 from PySide6.QtCore import Qt, QSettings, QThread, Signal
@@ -663,14 +663,17 @@ class IntelligencePage(QWidget):
         idx=self.folder.findData("bg")
         if idx>=0:self.folder.setCurrentIndex(idx)
         go=QPushButton("Analyze Model Facts");go.clicked.connect(self.analyze);self.go=go
-        row.addWidget(QLabel("Scope"));row.addWidget(self.folder,1);row.addWidget(go);b.addLayout(row)
+        export=QPushButton("Export Results");export.clicked.connect(self.export_results);export.setEnabled(False);self.export_button=export
+        row.addWidget(QLabel("Scope"));row.addWidget(self.folder,1);row.addWidget(go);row.addWidget(export);b.addLayout(row)
         cards=QHBoxLayout();self.models_card=QLabel("Models\n—");self.relationship_card=QLabel("Proven relationships\n—");self.unknown_card=QLabel("Unsupported / unknown\n—")
         for c in (self.models_card,self.relationship_card,self.unknown_card):
             c.setObjectName("card");c.setAlignment(Qt.AlignCenter);c.setMinimumHeight(72);cards.addWidget(c)
         b.addLayout(cards)
         self.status=QLabel("Ready. Start with BG to validate the evidence model.");self.status.setWordWrap(True);b.addWidget(self.status)
         self.table=QTableWidget(0,6);self.table.setHorizontalHeaderLabels(["Evidence","LOD","Asset A","Asset B","Measured result","Fingerprint"]);self.table.setSelectionBehavior(QAbstractItemView.SelectRows);self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(4,QHeaderView.Stretch);b.addWidget(self.table,1)
+        header=self.table.horizontalHeader();header.setSectionResizeMode(QHeaderView.Interactive);header.setStretchLastSection(False);header.setMinimumSectionSize(70)
+        for col,width in enumerate((190,75,220,220,560,220)):self.table.setColumnWidth(col,width)
+        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel);self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel);self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.table.setWordWrap(False);b.addWidget(self.table,1)
         self.unknown=QPlainTextEdit();self.unknown.setReadOnly(True);self.unknown.setMaximumHeight(120);self.unknown.setPlaceholderText("Unsupported / unknown assets will be listed here instead of guessed.");b.addWidget(self.unknown)
 
     def _rows(self):
@@ -693,7 +696,7 @@ class IntelligencePage(QWidget):
         self.go.setEnabled(True);self.task=None;self.status.setText(error);QMessageBox.critical(self,APP_NAME,error)
 
     def finished(self,result):
-        self.go.setEnabled(True);self.task=None;self.result=result;rels=result["relationships"];unknown=result["unsupported"]
+        self.go.setEnabled(True);self.export_button.setEnabled(True);self.task=None;self.result=result;rels=result["relationships"];unknown=result["unsupported"]
         self.models_card.setText(f"Models\n{result['models']:,}");self.relationship_card.setText(f"Proven relationships\n{len(rels):,}");self.unknown_card.setText(f"Unsupported / unknown\n{len(unknown):,}")
         self.table.setRowCount(len(rels))
         for r,x in enumerate(rels):
@@ -703,6 +706,23 @@ class IntelligencePage(QWidget):
         self.unknown.setPlainText("\n".join(f"{x['filename']}: {x['reason']}" for x in unknown))
         counts=" • ".join(f"{k}: {v:,}" for k,v in sorted(result["counts"].items()))
         self.status.setText(f"Complete • {result['decoded']:,}/{result['models']:,} decoded • {len(rels):,} proven relationships" + (f" • {counts}" if counts else " • no exact relationships in this scope"))
+
+
+    def export_results(self):
+        if not self.result:return
+        folder=self.folder.currentData() or "all-models";suggested=f"there-inspector-{folder}-model-facts.csv"
+        path,_=QFileDialog.getSaveFileName(self,"Export Intelligence Results",suggested,"CSV files (*.csv);;JSON files (*.json)")
+        if not path:return
+        try:
+            if path.lower().endswith(".json"):Path(path).write_text(json.dumps(self.result,indent=2),encoding="utf-8")
+            else:
+                if not path.lower().endswith(".csv"):path += ".csv"
+                with open(path,"w",newline="",encoding="utf-8-sig") as fh:
+                    w=csv.writer(fh);w.writerow(["record_type","evidence","lod","asset_a","asset_b","measured_result","fingerprint","geometry_shared","geometry_a","geometry_b","uv_shared","uv_a","uv_b","reason"])
+                    for x in self.result["relationships"]:w.writerow(["relationship",x.get("evidence",""),x.get("lod",""),x.get("asset_a",""),x.get("asset_b",""),x.get("details",""),x.get("fingerprint",""),x.get("geometry_shared",""),x.get("geometry_a",""),x.get("geometry_b",""),x.get("uv_shared",""),x.get("uv_a",""),x.get("uv_b",""),""])
+                    for x in self.result["unsupported"]:w.writerow(["unsupported","","",x.get("path",""),"","","","","","","","","",x.get("reason","")])
+            self.status.setText(f"Exported {len(self.result['relationships']):,} relationships and {len(self.result['unsupported']):,} unsupported records • {path}")
+        except Exception as exc:QMessageBox.critical(self,APP_NAME,f"Export failed:\\n{exc}")
 
 
 class ComparePage(QWidget):
