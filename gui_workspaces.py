@@ -483,7 +483,7 @@ class VehicleVariantsPage(QWidget):
         bg_analyze=QPushButton("Analyze BG Families");bg_analyze.clicked.connect(self.analyze_bg_families);self.bg_analyze_button=bg_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
-        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Near-tie m002 (0.005–0.010)","Extreme-tie m002 (<0.005)","4-seater m005 candidates","All near-ties (<0.010)"]);self.sample_mode.setToolTip("Validation modes probe family decisions without changing classifier state.")
+        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","m002 ↔ m005 disagreements","m002 candidate disagreements","m004 candidate disagreements","m005 candidate disagreements","Sparse evidence holds","All ambiguous"]);self.sample_mode.setToolTip("Validation modes probe unresolved BG populations without changing classifier state. Use these to approve the next automatic-resolution rules from small rendered samples.")
         self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Number of products in the validation sample")
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
 
@@ -818,9 +818,9 @@ class VehicleVariantsPage(QWidget):
     def _bg_diagnostic_sample(self,mode,target):
         """Build validation-only samples from unresolved BG analysis candidates.
 
-        These assignments are intentionally NOT written back to the resolver cache as
-        resolved. They let visual review establish where the safe acceptance boundary
-        is, including whether m005 really identifies the four-seat family.
+        dev18 established a trusted production baseline. These modes now sample the
+        remaining ambiguous population by disagreement pattern so a small visual
+        review can validate the next rule without promoting anything automatically.
         """
         cache=load_bg_cache() or {}
         diagnostics=cache.get("assignments") or {}
@@ -832,33 +832,48 @@ class VehicleVariantsPage(QWidget):
             if d.get("state")!="unresolved" or d.get("method")!="BG template family ambiguous":
                 continue
             family=str(d.get("family_model") or "")
+            family_l=family.lower()
+            uv=str(d.get("uv_winner") or "").lower()
+            template=str(d.get("template_winner") or "").lower()
             primary=bool(d.get("primary_agree"))
+            sparse=bool(d.get("sparse_evidence"))
             margin=float(d.get("margin") or 0.0)
             score=float(d.get("score") or 0.0)
             votes=int(d.get("votes") or 0)
-            if mode=="Near-tie m002 (0.005–0.010)":
-                keep=(family.lower()=="m002bg.model" and primary and 0.005<=margin<0.010)
-            elif mode=="Extreme-tie m002 (<0.005)":
-                keep=(family.lower()=="m002bg.model" and primary and 0.0<=margin<0.005)
-            elif mode=="4-seater m005 candidates":
-                # Do not require the old margin here: the point of this test is to
-                # discover whether strong m005/4-seat evidence exists at all.
-                keep=(family.lower()=="m005bg.model" and primary)
-            else: # All near-ties
-                keep=(primary and 0.0<=margin<0.010 and family.lower() in ("m002bg.model","m004bg.model","m005bg.model"))
+            evidence=float(d.get("evidence_confidence") or 0.0)
+
+            if mode=="m002 ↔ m005 disagreements":
+                keep=(not primary and {uv,template}=={"m002bg.model","m005bg.model"})
+            elif mode=="m002 candidate disagreements":
+                keep=(family_l=="m002bg.model" and not primary)
+            elif mode=="m004 candidate disagreements":
+                keep=(family_l=="m004bg.model" and not primary)
+            elif mode=="m005 candidate disagreements":
+                keep=(family_l=="m005bg.model" and not primary)
+            elif mode=="Sparse evidence holds":
+                keep=sparse
+            else: # All ambiguous
+                keep=True
             if not keep:continue
-            model=by_name.get(family.lower());paths=paths_by_pid.get(str(pid))
+            model=by_name.get(family_l);paths=paths_by_pid.get(str(pid))
             if not model or not paths:continue
             candidates.append({
                 "pid":str(pid),"textures":paths,"model":model,"state":"resolved","origin":"product",
-                "method":f"BG validation candidate • {family} • score {score:.4f} • margin {margin:.4f} • votes {votes}",
-                "_bg_score":score,"_bg_margin":margin,"_bg_votes":votes,"_bg_family":family
+                "method":(
+                    f"BG validation candidate • {family} • UV {d.get('uv_winner') or '?'} "
+                    f"• template {d.get('template_winner') or '?'} • evidence {evidence:.3f} "
+                    f"• score {score:.4f} • margin {margin:.4f} • votes {votes}"
+                ),
+                "_bg_score":score,"_bg_margin":margin,"_bg_votes":votes,
+                "_bg_evidence":evidence,"_bg_family":family
             })
-        # Strongest evidence first, but spread the final sample through that ranked
-        # population so a 50-render review is not just 50 nearly identical margins.
-        candidates.sort(key=lambda x:(-x["_bg_margin"],-x["_bg_score"],int(x["pid"]) if x["pid"].isdigit() else x["pid"]))
+
+        # Rank by independent evidence rather than winner margin. Spread the chosen
+        # sample through the full ranked population so the review covers both the
+        # strongest and weakest examples instead of cherry-picking easy cases.
+        candidates.sort(key=lambda x:(-x["_bg_evidence"],-x["_bg_votes"],-x["_bg_score"],int(x["pid"]) if x["pid"].isdigit() else x["pid"]))
         if len(candidates)<=target:return enrich_assignments(candidates),len(candidates)
-        if target==1:selected=[candidates[0]]
+        if target==1:selected=[candidates[len(candidates)//2]]
         else:
             last=len(candidates)-1;idxs=[]
             for i in range(target):
@@ -881,7 +896,7 @@ class VehicleVariantsPage(QWidget):
             if len(sample)>12:preview+=f"\n… plus {len(sample)-12} more"
             answer=QMessageBox.question(
                 self,"Render BG Diagnostic Sample",
-                f"{mode}\n\nRender {len(sample)} validation products from {population:,} matching unresolved candidates?\n\n"
+                f"{mode}\n\nRender {len(sample)} strategically spread validation products from {population:,} matching unresolved candidates?\n\n"
                 f"{preview}\n\nThese are TEST assignments only. Rendering them does not mark the products resolved.",
                 QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
             if answer!=QMessageBox.Yes:return
