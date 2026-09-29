@@ -634,41 +634,56 @@ def _resolve_material_textures(
     assignments: dict[int, Path | None] = {m.index: None for m in model.materials}
 
     if linked:
-        # Preserve There product texture suffixes, but map them by the model's
-        # actual There material semantics rather than by material ordinal.
-        # There map bits: 0=color, 1=opacity, 2=cutout, 3=lighting/detail,
-        # 4=gloss, 5=emission, 6=normal.
+        # There product models often embed their intended texture names. Prefer
+        # that direct model evidence before applying any slot convention.
         import re
         product_slots = {}
         unslotted = []
         for p in linked:
-            match = re.match(r"^\d+_([1-9]\d*)\.", p.name, re.IGNORECASE)
-            if match: product_slots[int(match.group(1))] = p
+            match = re.match(r"^(\d+)_([1-9]\d*)\.", p.name, re.IGNORECASE)
+            if match: product_slots[int(match.group(2))] = p
             else: unslotted.append(p)
+
+        def norm_tex_name(value):
+            name=Path(str(value).replace("\\","/")).name.lower()
+            return name[:-4] if name.endswith(".dds") else name
+
+        linked_by_name={norm_tex_name(p.name):p for p in linked}
+        for material in model.materials:
+            for embedded in material.textures:
+                key=norm_tex_name(embedded)
+                hit=linked_by_name.get(key)
+                if hit is None:
+                    # Common client form: embedded name ends at .jpg/.png while
+                    # the installed texture is that name plus .dds.
+                    hit=next((p for k,p in linked_by_name.items() if k==key or k.startswith(key+".")),None)
+                if hit is not None:
+                    assignments[material.index]=hit
+                    break
 
         if product_slots:
             window_material = next((m for m in model.materials
                                     if (m.map_mask & (1 << 0)) and (m.map_mask & (1 << 1))), None)
-            body_material = next((m for m in model.materials
-                                  if (m.map_mask & (1 << 0)) and not (m.map_mask & ((1 << 1) | (1 << 2)))), None)
-            if body_material is None and model.materials:
-                body_material = model.materials[0]
-            if 1 in product_slots and body_material:
-                assignments[body_material.index] = product_slots[1]
-            if 3 in product_slots and window_material:
-                assignments[window_material.index] = product_slots[3]
-            # Generic fallback for non-buggy product sets.
-            for slot,p in product_slots.items():
-                if slot in (1,3,4): continue
+            buggy_semantics = window_material is not None
+            if buggy_semantics:
+                body_material = next((m for m in model.materials
+                                      if (m.map_mask & (1 << 0)) and not (m.map_mask & ((1 << 1) | (1 << 2)))), None)
+                if body_material is None and model.materials: body_material=model.materials[0]
+                if 1 in product_slots and body_material and assignments[body_material.index] is None:
+                    assignments[body_material.index]=product_slots[1]
+                if 3 in product_slots and assignments[window_material.index] is None:
+                    assignments[window_material.index]=product_slots[3]
+                if 3 in product_slots and window_material is None and len(model.materials)>=2:
+                    assignments[model.materials[1].index]=product_slots[3]
+            # For ordinary PID-specific product models, slot N maps to material
+            # ordinal N-1 only as a fallback after embedded-name evidence.
+            for slot,p in sorted(product_slots.items()):
                 idx=slot-1
-                if idx in assignments and assignments[idx] is None: assignments[idx]=p
-            # Older buggy models may not expose opacity semantics. Preserve
-            # compatibility with the previous two-material convention.
-            if 3 in product_slots and window_material is None and len(model.materials)>=2:
-                assignments[model.materials[1].index]=product_slots[3]
+                if idx in assignments and assignments[idx] is None:
+                    assignments[idx]=p
         else:
             for material,p in zip(model.materials,sorted(unslotted,key=lambda x:x.name.lower())):
-                assignments[material.index] = p
+                if assignments[material.index] is None: assignments[material.index] = p
 
     resource_root = None
     parts = list(model_path.resolve().parts)
