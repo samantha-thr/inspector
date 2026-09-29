@@ -5,5 +5,8 @@
       "m001bg.model",
       "m515bf.model"
     ]
+  },
+  "hbk": {
+    "base_model": "m000hbk_sportbike.model"
   }
 }
