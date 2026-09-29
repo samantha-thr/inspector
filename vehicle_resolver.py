@@ -5,12 +5,35 @@ from pathlib import Path
 RULES_PATH=Path("vehicle_resolution_rules.json")
 
 
+def resource_identity(filename):
+    """Classify There client resources by their leading filename character.
+
+    Numeric-leading resources are product/PID content. Alphabetic-leading
+    resources are official/client resources. This records the client naming
+    convention only; it does not attempt to identify a human author.
+    """
+    name=Path(filename).name
+    stem=Path(name).stem
+    if not stem:
+        return {"origin":"unknown","pid":None}
+    if stem[0].isdigit():
+        m=re.match(r"^(\d+)",stem)
+        return {"origin":"product","pid":m.group(1) if m else None}
+    if stem[0].isalpha():
+        return {"origin":"official","pid":None}
+    return {"origin":"unknown","pid":None}
+
+
 def model_pid(filename):
-    """Return an explicit numeric product id only when the model filename encodes it."""
-    stem=Path(filename).stem.lower()
-    # Custom/product models may be m<PID><folder>. Never treat short stock ids as product PIDs.
-    m=re.match(r"^m(\d{5,})(?:[a-z].*)?$",stem)
-    return m.group(1) if m else None
+    """Return PID only for a bare numeric-leading product model.
+
+    Examples:
+      95054471.model -> 95054471
+      m000hbk_sportbike.model -> None (official resource)
+      mhc001hb_lightning.model -> None (official resource)
+    """
+    ident=resource_identity(filename)
+    return ident["pid"] if ident["origin"]=="product" else None
 
 
 def load_rules():
@@ -41,7 +64,7 @@ def resolve_products(folder,models,product_sets):
             model=base;method="configured base model";state="resolved"
         else:
             model=None;method="no authoritative model rule";state="unresolved"
-        assignments.append({"pid":pid,"textures":paths,"model":model,"method":method,"state":state})
+        assignments.append({"pid":pid,"textures":paths,"model":model,"method":method,"state":state,"origin":"product"})
     return assignments
 
 
