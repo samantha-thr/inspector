@@ -11,7 +11,7 @@ from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_con
 from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION, cached_variant_thumbnail, render_model_variant, remove_cached_variant, PersistentVariantWorker
 from uv_intelligence import analyze_model_uv, compare_uv_fingerprints
 from model_forensics import analyze_model_rows
-from vehicle_resolver import resolve_products, resolution_summary
+from vehicle_resolver import resolve_products, resolution_summary, enrich_assignments, folder_configuration
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -377,6 +377,38 @@ class VariantRenderTask(QThread):
             for worker in workers:drop_worker(worker)
             pool.shutdown(wait=True,cancel_futures=True)
         self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"cancelled":self.cancelled,"completed":completed,"failures":failures,"engine":"persistent" if self.persistent else "one-shot"})
+
+class ResolvedVariantRenderTask(QThread):
+    progress=Signal(int,int,str,float,float);done=Signal(object)
+    def __init__(self,assignments,workers=2):
+        super().__init__();self.assignments=list(assignments);self.workers=max(1,int(workers));self.cancelled=False;self.cancel_event=threading.Event()
+    def cancel(self):
+        self.cancelled=True;self.cancel_event.set()
+    def _one(self,item):
+        pid=item["pid"];model=item["model"];paths=item["textures"]
+        if self.cancel_event.is_set():return item,{"success":False,"cancelled":True}
+        try:return item,render_model_variant(model["path"],paths,512,False,self.cancel_event)
+        except Exception as exc:return item,{"success":False,"message":str(exc)}
+    def run(self):
+        total=len(self.assignments);started=time.monotonic();completed=ok=cached=failed=0;failures=[];outputs=[]
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            futures={pool.submit(self._one,x):x for x in self.assignments}
+            for future in as_completed(futures):
+                if self.cancel_event.is_set():break
+                item,result=future.result()
+                if result.get("cancelled"):continue
+                completed+=1
+                if result.get("cached"):cached+=1
+                elif result.get("success"):ok+=1
+                else:
+                    failed+=1;failures.append({"pid":item["pid"],"model":item["model"]["filename"],"message":result.get("message") or "Render failed","returncode":result.get("returncode"),"log":result.get("log","")})
+                if result.get("success"):outputs.append({"pid":item["pid"],"model":item["model"],"textures":item["textures"],"output":result.get("output"),"cached":bool(result.get("cached"))})
+                elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
+                self.progress.emit(completed,total,item["pid"],rate,remaining)
+            if self.cancel_event.is_set():
+                for future in futures:future.cancel()
+        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"completed":completed,"cancelled":self.cancelled,"failures":failures,"outputs":outputs,"engine":"one-shot resolved-model"})
+
 
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
