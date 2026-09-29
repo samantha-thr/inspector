@@ -482,7 +482,7 @@ class VehicleVariantsPage(QWidget):
         bg_analyze=QPushButton("Analyze BG Families");bg_analyze.clicked.connect(self.analyze_bg_families);self.bg_analyze_button=bg_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
-        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Borderline m002","4-seater m005 candidates","All borderline"]);self.sample_mode.setToolTip("Resolved validation uses accepted products. Borderline modes are validation-only and deliberately render unresolved BG candidates without changing their classifier state.")
+        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Near-tie m002 (0.005–0.010)","Extreme-tie m002 (<0.005)","4-seater m005 candidates","All near-ties (<0.010)"]);self.sample_mode.setToolTip("Resolved validation uses accepted products. Near-tie modes probe unresolved BG candidates below the current margin gate without changing their classifier state.")
         self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Number of products in the validation sample")
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
         for w in (QLabel("Workers"),self.workers,config,uv_analyze,bg_analyze,resolve,QLabel("Test"),self.sample_mode,QLabel("Sample"),self.sample_size,sample,self.render_button,self.cancel_button,self.failures_button,self.export_render_button,self.delete_all_button):action_row.addWidget(w)
@@ -822,14 +822,16 @@ class VehicleVariantsPage(QWidget):
             margin=float(d.get("margin") or 0.0)
             score=float(d.get("score") or 0.0)
             votes=int(d.get("votes") or 0)
-            if mode=="Borderline m002":
-                keep=(family.lower()=="m002bg.model" and primary and 0.010<=margin<0.015)
+            if mode=="Near-tie m002 (0.005–0.010)":
+                keep=(family.lower()=="m002bg.model" and primary and 0.005<=margin<0.010)
+            elif mode=="Extreme-tie m002 (<0.005)":
+                keep=(family.lower()=="m002bg.model" and primary and 0.0<=margin<0.005)
             elif mode=="4-seater m005 candidates":
                 # Do not require the old margin here: the point of this test is to
                 # discover whether strong m005/4-seat evidence exists at all.
                 keep=(family.lower()=="m005bg.model" and primary)
-            else: # All borderline
-                keep=(primary and 0.010<=margin<0.015 and family.lower() in ("m002bg.model","m004bg.model","m005bg.model"))
+            else: # All near-ties
+                keep=(primary and 0.0<=margin<0.010 and family.lower() in ("m002bg.model","m004bg.model","m005bg.model"))
             if not keep:continue
             model=by_name.get(family.lower());paths=paths_by_pid.get(str(pid))
             if not model or not paths:continue
