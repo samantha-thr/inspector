@@ -381,7 +381,20 @@ def analyze_bg_families(product_sets,models,rules=None):
     for pid,paths in product_sets:
         body=next((Path(p) for p in paths if _slot(p)==1),None)
         if body is None or not body.exists():
-            assignments[str(pid)]={"state":"unresolved","method":"BG body texture unavailable","model":None}
+            # Evidence confidence is intentionally separate from winner margin.
+        # Similar UV families can be genuine near-ties, so confidence should reflect
+        # the quality and agreement of the evidence rather than separation alone.
+        evidence_parts=[
+            max(0.0,min(1.0,uv_outline_scores.get(winner,0.0))),
+            max(0.0,min(1.0,template_outline_scores.get(winner,0.0))),
+            max(0.0,min(1.0,uv_precision_scores.get(winner,0.0))),
+            max(0.0,min(1.0,vote_count/4.0)),
+            1.0 if primary_agree else 0.0,
+        ]
+        evidence_confidence=sum(evidence_parts)/len(evidence_parts)
+        evidence_band="strong" if evidence_confidence>=0.72 else ("moderate" if evidence_confidence>=0.60 else "limited")
+
+        assignments[str(pid)]={"state":"unresolved","method":"BG body texture unavailable","model":None}
             counts["missing_body"]+=1
             continue
 
@@ -521,7 +534,7 @@ def analyze_bg_families(product_sets,models,rules=None):
             "state":state,"method":method,"model":model,
             "family_model":winner,"template":anchor["template"],"paintable":anchor["paintable"],
             "score":round(score80,6),"margin":round(margin,6),"votes":vote_count,
-            "confidence_tier":confidence_tier,"primary_agree":primary_agree,
+            "confidence_tier":confidence_tier,"evidence_confidence":round(evidence_confidence,6),"evidence_band":evidence_band,"primary_agree":primary_agree,
             "uv_winner":uv_winner,"template_winner":template_winner,
             "decision_reason":decision_reason,
             "strict_score_gap":round(strict_score_gap,6),"strict_margin_gap":round(strict_margin_gap,6),
@@ -577,7 +590,7 @@ def _write_report(payload):
         w=csv.writer(fh)
         models=[a["model"] for a in payload.get("anchors",[])]
         w.writerow([
-            "pid","state","method","confidence_tier","decision_reason",
+            "pid","state","method","confidence_tier","evidence_confidence","evidence_band","decision_reason",
             "primary_agree","uv_winner","template_winner","family_model","template",
             "score","margin","votes",
             "strict_score_gap","strict_margin_gap",
@@ -594,7 +607,7 @@ def _write_report(payload):
         for pid,x in sorted(payload.get("assignments",{}).items(),key=lambda kv:int(kv[0]) if kv[0].isdigit() else kv[0]):
             occ=x.get("occupancy") or {}
             w.writerow([
-                pid,x.get("state"),x.get("method"),x.get("confidence_tier",""),x.get("decision_reason",""),
+                pid,x.get("state"),x.get("method"),x.get("confidence_tier",""),x.get("evidence_confidence",""),x.get("evidence_band",""),x.get("decision_reason",""),
                 x.get("primary_agree",""),x.get("uv_winner",""),x.get("template_winner",""),
                 x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),
                 x.get("strict_score_gap",""),x.get("strict_margin_gap",""),
