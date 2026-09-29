@@ -803,7 +803,8 @@ def export_obj(
 
     linked = [Path(p) for p in (linked_textures or [])]
     model_path = Path(model.path)
-    texture_assignments = _resolve_material_textures(model, model_path, linked)
+    texture_assignments, binding_details = _resolve_material_texture_bindings(model, model_path, linked)
+    is_bg_variant = _is_bg_model_path(model_path)
 
     mtl_path = output_path.with_suffix(".mtl")
     lines = [
@@ -897,12 +898,17 @@ def export_obj(
         texture = texture_assignments.get(material.index)
         if texture:
             mtl_lines.append(f"map_Kd {texture.resolve().as_posix()}")
-        # Product _4 is the opacity companion for a material whose There
-        # map mask explicitly contains both COLOR(bit 0) and OPACITY(bit 1).
-        if (material.map_mask & 0x03) == 0x03 and linked:
-            slot4 = next((p for p in linked if re.match(r"^\\d+_4\\.", p.name, re.IGNORECASE)), None)
-            if slot4:
-                mtl_lines.append(f"map_d {slot4.resolve().as_posix()}")
+        # BG is the only known vehicle family with a separate window-opacity
+        # companion texture. Never apply this convention to ordinary models.
+        if is_bg_variant and (material.map_mask & 0x03) == 0x03 and linked:
+            numbered = {}
+            for p in linked:
+                mm = re.match(r"^\\d+_([1-9]\\d*)\\.", p.name, re.IGNORECASE)
+                if mm:
+                    numbered[int(mm.group(1))] = p
+            alpha_slot = 4 if 3 in numbered and 4 in numbered else (3 if 2 in numbered and 3 in numbered and 4 not in numbered else None)
+            if alpha_slot:
+                mtl_lines.append(f"map_d {numbered[alpha_slot].resolve().as_posix()}")
         mtl_lines.append("")
 
     mtl_path.write_text("\n".join(mtl_lines), encoding="utf-8")
@@ -918,7 +924,7 @@ def export_obj(
         "triangles": model.triangle_count,
         "collision": model.collision is not None,
         "materials": len(model.materials),
-        "material_details": [{"index":m.index,"name":m.name,"bool_mask":m.bool_mask,"bool_values":m.bool_values,"map_mask":m.map_mask,"map_bits":[b for b in range(7) if m.map_mask & (1<<b)],"texture_maps":dict(m.texture_maps)} for m in model.materials],
+        "material_details": [{"index":m.index,"name":m.name,"bool_mask":m.bool_mask,"bool_values":m.bool_values,"map_mask":m.map_mask,"map_bits":[b for b in range(7) if m.map_mask & (1<<b)],"texture_maps":dict(m.texture_maps)} for m in model.materials],\n        "binding_profile": "bg-window-opacity" if is_bg_variant else "model-driven",\n        "texture_bindings": binding_details,
         "nodes": len(model.nodes),
     }
 
