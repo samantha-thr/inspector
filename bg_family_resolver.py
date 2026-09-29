@@ -266,9 +266,19 @@ def analyze_bg_families(product_sets,models,rules=None):
     if len(anchors)<2:
         return {"ok":False,"message":"Fewer than two verified BG reference templates were found in the indexed client folder.","assignments":{},"anchors":[]}
 
+    usable_anchors=[]
     for anchor in anchors:
         anchor["masks"]={str(q):_activity_mask(anchor["path"],q) for q in QUANTILES}
         anchor["occupancy"]=_foreground_occupancy(anchor["path"])
+        try:
+            anchor["model_uv"]=_model_body_uv_mask(anchor["model_path"],anchor["template"])
+            anchor["anchor_uv_metrics"]=_mask_metrics(anchor["occupancy"]["mask"],anchor["model_uv"]["mask"])
+            usable_anchors.append(anchor)
+        except Exception as exc:
+            anchor["uv_error"]=str(exc)
+    anchors=usable_anchors
+    if len(anchors)<2:
+        return {"ok":False,"message":"Fewer than two BG reference models produced usable body-material UV masks.","assignments":{},"anchors":[]}
     fingerprint=_anchor_fingerprint(anchors)
     assignments={}
     counts={"resolved":0,"ambiguous":0,"special":0,"missing_body":0,"low_information":0}
@@ -292,41 +302,29 @@ def analyze_bg_families(product_sets,models,rules=None):
             counts["low_information"]+=1
             continue
 
-        per_q={}
-        votes={}
         occupancy_scores={}
+        uv_scores={}
+        uv_metrics={}
+        combined={}
         for anchor in anchors:
+            model_name=anchor["model"]
             if candidate_occ["usable"] and anchor["occupancy"]["usable"]:
-                occupancy_scores[anchor["model"]]=_mask_iou(candidate_occ["mask"],anchor["occupancy"]["mask"])
+                occupancy_scores[model_name]=_mask_iou(candidate_occ["mask"],anchor["occupancy"]["mask"])
             else:
-                occupancy_scores[anchor["model"]]=None
+                occupancy_scores[model_name]=None
+            metrics=_mask_metrics(candidate_occ["mask"],anchor["model_uv"]["mask"]) if candidate_occ["usable"] else {"iou":0.0,"dice":0.0,"precision":0.0,"coverage":0.0}
+            uv_metrics[model_name]=metrics
+            uv_scores[model_name]=metrics["dice"]
+            occ=occupancy_scores[model_name]
+            combined[model_name]=(MODEL_UV_WEIGHT*uv_scores[model_name] + OCCUPANCY_WEIGHT*(occ if occ is not None else uv_scores[model_name]))
 
-        for q in QUANTILES:
-            activity=_activity_mask(body,q)
-            activity_scores={a["model"]:_mask_iou(activity,a["masks"][str(q)]) for a in anchors}
-            combined={}
-            for a in anchors:
-                model=a["model"];occ=occupancy_scores.get(model)
-                if occ is None:
-                    combined[model]=activity_scores[model]
-                else:
-                    combined[model]=OCCUPANCY_WEIGHT*occ+(1.0-OCCUPANCY_WEIGHT)*activity_scores[model]
-            ranked=sorted(combined.items(),key=lambda x:x[1],reverse=True)
-            per_q[str(q)]={
-                "scores":combined,
-                "activity_scores":activity_scores,
-                "occupancy_scores":occupancy_scores,
-                "winner":ranked[0][0],"score":ranked[0][1],
-                "runner_up":ranked[1][0],"runner_up_score":ranked[1][1],
-            }
-            votes[ranked[0][0]]=votes.get(ranked[0][0],0)+1
-
-        winner,vote_count=max(votes.items(),key=lambda x:(x[1],per_q["0.8"]["scores"].get(x[0],0)))
-        score80=per_q["0.8"]["scores"][winner]
-        second80=max((v for k,v in per_q["0.8"]["scores"].items() if k!=winner),default=0.0)
+        ranked=sorted(combined.items(),key=lambda x:x[1],reverse=True)
+        winner,score80=ranked[0]
+        second80=ranked[1][1] if len(ranked)>1 else 0.0
         margin=score80-second80
+        vote_count=1
         anchor=next(a for a in anchors if a["model"]==winner)
-        clear=(vote_count>=2 and score80>=MIN_WINNER_SCORE and margin>=MIN_MARGIN)
+        clear=(candidate_occ["usable"] and score80>=MIN_WINNER_SCORE and margin>=MIN_MARGIN)
 
         if not clear:
             state="unresolved";method="BG template family ambiguous";model=None;counts["ambiguous"]+=1
@@ -339,8 +337,9 @@ def analyze_bg_families(product_sets,models,rules=None):
             "state":state,"method":method,"model":model,
             "family_model":winner,"template":anchor["template"],"paintable":anchor["paintable"],
             "score":round(score80,6),"margin":round(margin,6),"votes":vote_count,
-            "scores":{k:round(v,6) for k,v in per_q["0.8"]["scores"].items()},
-            "activity_scores":{k:round(v,6) for k,v in per_q["0.8"]["activity_scores"].items()},
+            "scores":{k:round(v,6) for k,v in combined.items()},
+            "uv_scores":{k:round(v,6) for k,v in uv_scores.items()},
+            "uv_metrics":{k:{mk:round(mv,6) for mk,mv in vals.items()} for k,vals in uv_metrics.items()},
             "occupancy_scores":{k:(round(v,6) if v is not None else None) for k,v in occupancy_scores.items()},
             "occupancy":{k:v for k,v in candidate_occ.items() if k!="mask"},
             "body_path":str(body),"body_size":body.stat().st_size,"body_mtime_ns":body.stat().st_mtime_ns,
@@ -351,12 +350,14 @@ def analyze_bg_families(product_sets,models,rules=None):
         "anchor_fingerprint":fingerprint,
         "thresholds":{
             "quantiles":QUANTILES,"min_winner_score":MIN_WINNER_SCORE,"min_margin":MIN_MARGIN,
-            "background_tolerance":BACKGROUND_TOLERANCE,"occupancy_weight":OCCUPANCY_WEIGHT,
+            "background_tolerance":BACKGROUND_TOLERANCE,"model_uv_weight":MODEL_UV_WEIGHT,"occupancy_weight":OCCUPANCY_WEIGHT,
             "min_texture_stddev":MIN_TEXTURE_STDDEV,
         },
         "anchors":[{
             "model":a["model"],"model_path":a["model_path"],"template":a["template"],"paintable":a["paintable"],
             "occupancy":{k:v for k,v in a["occupancy"].items() if k!="mask"},
+            "model_uv":{"triangles":a["model_uv"]["triangles"],"area":a["model_uv"]["area"],"material_ids":a["model_uv"]["material_ids"]},
+            "anchor_uv_metrics":{k:round(v,6) for k,v in a["anchor_uv_metrics"].items()},
         } for a in anchors],
         "counts":counts,"assignments":assignments,
     }
