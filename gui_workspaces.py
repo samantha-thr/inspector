@@ -433,13 +433,14 @@ class VehicleVariantsPage(QWidget):
         self.render_button=QPushButton("Render Resolved Missing");self.render_button.clicked.connect(self.render_all_resolved)
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete Resolved Renders");self.delete_all_button.clicked.connect(self.delete_all_resolved_variants)
-        self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
+        self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[];self.last_render_report=None
+        self.export_render_button=QPushButton("Export Last Render");self.export_render_button.setEnabled(False);self.export_render_button.clicked.connect(self.export_last_render)
         uv_analyze=QPushButton("Analyze UV Families");uv_analyze.clicked.connect(self.analyze_uv_families);self.uv_analyze_button=uv_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
         self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Deterministic spread across the missing exact-PID population")
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
-        for w in (QLabel("Workers"),self.workers,config,uv_analyze,resolve,QLabel("Sample"),self.sample_size,sample,self.render_button,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
+        for w in (QLabel("Workers"),self.workers,config,uv_analyze,resolve,QLabel("Sample"),self.sample_size,sample,self.render_button,self.cancel_button,self.failures_button,self.export_render_button,self.delete_all_button):action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
         self.compatibility=QLabel("Resolver status: authoritative PID/model matches and explicit rules only.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
@@ -674,11 +675,22 @@ class VehicleVariantsPage(QWidget):
             QMessageBox.information(self,APP_NAME,"A render task is already running.");return
         assignments=[x for x in self._resolved_assignments() if x["state"]=="resolved" and x["method"]=="exact PID model"]
         missing=[x for x in assignments if not cached_variant_thumbnail(x["model"]["path"],x["textures"])]
-        sample=missing[:10]
-        if not sample:
-            self.status.setText("No missing exact-PID resolved variants available for the 10-item test.");return
-        names="\n".join(f"{x['pid']} → {x['model']['filename']}" for x in sample)
-        answer=QMessageBox.question(self,"Render Verified Resolver Sample",f"Render {len(sample)} exact-PID products using their automatically resolved numeric models?\n\n{names}\n\nNo fallback or unresolved product will be included.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        target=int(self.sample_size.currentText())
+        if not missing:
+            self.status.setText("No missing exact-PID resolved variants available for sampling.");return
+        if len(missing)<=target:
+            sample=list(missing)
+        else:
+            # Deterministic spread across the full PID population avoids biasing
+            # validation toward only the earliest product IDs while remaining reproducible.
+            idxs=[];last=len(missing)-1
+            for i in range(target):
+                idx=int(round(i*last/(target-1)))
+                if idx not in idxs:idxs.append(idx)
+            sample=[missing[i] for i in idxs]
+        preview="\n".join(f"{x['pid']} → {x['model']['filename']}" for x in sample[:12])
+        if len(sample)>12:preview+=f"\n… plus {len(sample)-12} more"
+        answer=QMessageBox.question(self,"Render Verified Resolver Sample",f"Render a {len(sample)}-product spread sample from {len(missing):,} missing exact-PID products?\n\n{preview}\n\nNo fallback or unresolved product will be included. The exact sampled PID list will be exportable.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
         if answer!=QMessageBox.Yes:return
         self.progress.setRange(0,len(sample));self.progress.setValue(0);self.sample_button.setEnabled(False);self.cancel_button.setEnabled(True)
         self.status.setText(f"Auto-rendering {len(sample)} exact-PID resolved products with one-shot Blender…")
