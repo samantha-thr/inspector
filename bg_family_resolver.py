@@ -14,7 +14,7 @@ from there_texture_decoder import open_texture_image
 from there_model_decoder import decode_model
 
 
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 CACHE_PATH = Path("cache/bg_family_resolution.json")
 REPORT_ROOT = Path("reports/bg_family_analysis")
 QUANTILES = (0.70, 0.80, 0.85)
@@ -27,6 +27,7 @@ MIN_BORDER_BACKGROUND_SHARE = 0.15
 MIN_FOREGROUND_FRACTION = 0.04
 MAX_FOREGROUND_FRACTION = 0.96
 MIN_TEXTURE_STDDEV = 5.0
+ANALYSIS_ALGORITHM = "model-body-uv-v1"
 
 
 def _slot(path):
@@ -216,8 +217,28 @@ def _file_token(path: Path):
 
 
 def _anchor_fingerprint(anchors):
-    payload="\n".join(sorted(f"{x['model']}|{x['paintable']}|{_file_token(x['path'])}" for x in anchors))
+    payload="\n".join(sorted(
+        f"{x['model']}|{x['paintable']}|{_file_token(x['path'])}|{_file_token(Path(x['model_path']))}"
+        for x in anchors
+    ))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _analysis_fingerprint(anchor_fingerprint):
+    settings={
+        "algorithm":ANALYSIS_ALGORITHM,
+        "background_tolerance":BACKGROUND_TOLERANCE,
+        "model_uv_weight":MODEL_UV_WEIGHT,
+        "occupancy_weight":OCCUPANCY_WEIGHT,
+        "min_winner_score":MIN_WINNER_SCORE,
+        "min_margin":MIN_MARGIN,
+        "min_border_background_share":MIN_BORDER_BACKGROUND_SHARE,
+        "min_foreground_fraction":MIN_FOREGROUND_FRACTION,
+        "max_foreground_fraction":MAX_FOREGROUND_FRACTION,
+        "min_texture_stddev":MIN_TEXTURE_STDDEV,
+    }
+    encoded=json.dumps(settings,sort_keys=True,separators=(",",":"))
+    return hashlib.sha256(f"{anchor_fingerprint}\n{encoded}".encode("utf-8")).hexdigest()
 
 
 def _load_rules(rules_path=Path("vehicle_resolution_rules.json")):
@@ -280,8 +301,9 @@ def analyze_bg_families(product_sets,models,rules=None):
     if len(anchors)<2:
         return {"ok":False,"message":"Fewer than two BG reference models produced usable body-material UV masks.","assignments":{},"anchors":[]}
     fingerprint=_anchor_fingerprint(anchors)
+    analysis_fingerprint=_analysis_fingerprint(fingerprint)
     previous=load_bg_cache()
-    reuse_previous=bool(previous and previous.get("anchor_fingerprint")==fingerprint)
+    reuse_previous=bool(previous and previous.get("analysis_fingerprint")==analysis_fingerprint)
     previous_assignments=(previous.get("assignments") or {}) if reuse_previous else {}
     assignments={}
     counts={"resolved":0,"ambiguous":0,"special":0,"missing_body":0,"low_information":0}
@@ -369,6 +391,8 @@ def analyze_bg_families(product_sets,models,rules=None):
     payload={
         "version":CACHE_VERSION,"created":time.strftime("%Y-%m-%d %H:%M:%S"),
         "anchor_fingerprint":fingerprint,
+        "analysis_fingerprint":analysis_fingerprint,
+        "algorithm":ANALYSIS_ALGORITHM,
         "thresholds":{
             "quantiles":QUANTILES,"min_winner_score":MIN_WINNER_SCORE,"min_margin":MIN_MARGIN,
             "background_tolerance":BACKGROUND_TOLERANCE,"model_uv_weight":MODEL_UV_WEIGHT,"occupancy_weight":OCCUPANCY_WEIGHT,
@@ -398,9 +422,9 @@ def _write_report(payload):
     with open(cp,"w",newline="",encoding="utf-8-sig") as fh:
         w=csv.writer(fh)
         models=[a["model"] for a in payload.get("anchors",[])]
-        w.writerow(["pid","state","method","family_model","template","score","margin","votes","foreground_fraction","border_background_share","stddev",*[f"combined:{m}" for m in models],*[f"occupancy:{m}" for m in models]])
+        w.writerow(["pid","state","method","family_model","template","score","margin","votes","foreground_fraction","border_background_share","stddev",*[f"combined:{m}" for m in models],*[f"uv:{m}" for m in models],*[f"occupancy:{m}" for m in models]])
         for pid,x in sorted(payload.get("assignments",{}).items(),key=lambda kv:int(kv[0]) if kv[0].isdigit() else kv[0]):
-            occ=x.get("occupancy") or {};w.writerow([pid,x.get("state"),x.get("method"),x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),occ.get("foreground_fraction",""),occ.get("border_background_share",""),occ.get("stddev",""),*[x.get("scores",{}).get(m,"") for m in models],*[x.get("occupancy_scores",{}).get(m,"") for m in models]])
+            occ=x.get("occupancy") or {};w.writerow([pid,x.get("state"),x.get("method"),x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),occ.get("foreground_fraction",""),occ.get("border_background_share",""),occ.get("stddev",""),*[x.get("scores",{}).get(m,"") for m in models],*[x.get("uv_scores",{}).get(m,"") for m in models],*[x.get("occupancy_scores",{}).get(m,"") for m in models]])
     payload["report_csv"]=str(cp)
     payload["report_json"]=str(jp)
 
