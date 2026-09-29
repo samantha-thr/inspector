@@ -693,6 +693,47 @@ class VehicleVariantsPage(QWidget):
         area.setWidget(host);v.addWidget(area,1);bb=QDialogButtonBox(QDialogButtonBox.Close);bb.rejected.connect(d.reject);v.addWidget(bb);d.exec()
         self.status.setText(f"Resolved sample complete • rendered {result.get('rendered',0):,} • cached {result.get('cached',0):,} • failed {result.get('failed',0):,}")
 
+    def delete_resolved_variant(self,item):
+        if not item.get("model"):return
+        remove_cached_variant(item["model"]["path"],item["textures"]);self.refresh()
+
+    def delete_all_resolved_variants(self):
+        if self.task and self.task.isRunning():
+            QMessageBox.warning(self,APP_NAME,"Stop the current render task before deleting cached renders.");return
+        assignments=[x for x in self._basic_resolved_assignments() if x["state"]=="resolved" and x.get("model")]
+        cached=[x for x in assignments if cached_variant_thumbnail(x["model"]["path"],x["textures"])]
+        if not cached:
+            self.status.setText("No cached resolver-driven renders in this folder.");return
+        answer=QMessageBox.question(self,"Delete Resolved Renders",f"Delete {len(cached):,} cached product variant renders from {self.folder_name()}?\n\nOnly generated PNG previews are removed. Source models, textures and database records are untouched.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if answer!=QMessageBox.Yes:return
+        removed=0
+        for x in cached:
+            if remove_cached_variant(x["model"]["path"],x["textures"]):removed+=1
+        self.refresh();self.status.setText(f"Deleted {removed:,} cached resolver-driven renders.")
+
+    def render_all_resolved(self):
+        if self.task and self.task.isRunning():
+            QMessageBox.information(self,APP_NAME,"A render task is already running.");return
+        assignments=[x for x in self._basic_resolved_assignments() if x["state"]=="resolved" and x.get("model")]
+        missing=[x for x in assignments if not cached_variant_thumbnail(x["model"]["path"],x["textures"])]
+        if not missing:
+            self.status.setText("All currently resolved product variants already have cached renders.");return
+        methods=resolution_summary(missing)["by_method"]
+        detail="\n".join(f"{k}: {v:,}" for k,v in sorted(methods.items()))
+        answer=QMessageBox.question(self,"Render Resolved Missing",f"Render {len(missing):,} resolved products in {self.folder_name()} using the model selected by the resolver?\n\n{detail}\n\nUnresolved products are excluded. This uses one-shot Blender because resolved products may use different models.",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if answer!=QMessageBox.Yes:return
+        self.progress.setRange(0,len(missing));self.progress.setValue(0);self.render_button.setEnabled(False);self.sample_button.setEnabled(False);self.cancel_button.setEnabled(True)
+        self.status.setText(f"Rendering {len(missing):,} resolver-approved product variants…")
+        self.task=ResolvedVariantRenderTask(missing,int(self.workers.currentText()));self.task.progress.connect(self.on_progress);self.task.done.connect(self.resolved_full_finished);self.task.start()
+
+    def resolved_full_finished(self,result):
+        self.render_button.setEnabled(True);self.sample_button.setEnabled(True);self.cancel_button.setEnabled(False);self.task=None
+        self.last_failures=result.get("failures",[]);self.failures_button.setEnabled(bool(self.last_failures));self.refresh()
+        if result.get("cancelled"):
+            self.status.setText(f"Stopped • completed {result.get('completed',0):,} • rendered {result.get('rendered',0):,} • failed {result.get('failed',0):,}")
+        else:
+            self.progress.setValue(self.progress.maximum());self.status.setText(f"Resolver render complete • rendered {result.get('rendered',0):,} • cached {result.get('cached',0):,} • failed {result.get('failed',0):,}")
+
     def analyze_uv_families(self):
         """Decode every model in the selected folder and group exact LOD0 UV layouts."""
         folder=self.folder_name();models=self.db.models_in_folder(folder,10000)
