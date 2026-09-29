@@ -76,3 +76,81 @@ def resolution_summary(assignments):
         if x["model"]:
             name=x["model"]["filename"];out["by_model"][name]=out["by_model"].get(name,0)+1
     return out
+
+
+def _printable_strings(path, limit=40):
+    """Extract diagnostic strings from a config without interpreting unknown fields."""
+    try:
+        data=Path(path).read_bytes()
+    except Exception:
+        return []
+    found=[]
+    for m in re.finditer(rb"[\x20-\x7e]{4,}",data):
+        text=m.group(0).decode("latin1","replace").strip()
+        if text and text not in found:found.append(text)
+        if len(found)>=limit:break
+    # Some client configs may contain UTF-16LE text. Keep this evidence separate.
+    try:
+        decoded=data.decode("utf-16le",errors="ignore")
+        for text in re.findall(r"[ -~]{4,}",decoded):
+            text=text.strip()
+            if text and text not in found:found.append(text)
+            if len(found)>=limit:break
+    except Exception:
+        pass
+    return found
+
+
+def aconf_evidence(pid, texture_paths):
+    """Return presence/raw-string evidence for the sibling PID .aconf file."""
+    if not texture_paths:return {"exists":False,"path":None,"strings":[]}
+    parent=Path(texture_paths[0]).parent
+    candidates=[parent/f"{pid}.aconf"]
+    # Preserve case-insensitive Windows behavior when the exact path isn't present.
+    if not candidates[0].exists():
+        try:
+            candidates.extend(p for p in parent.glob("*.aconf") if p.stem.lower()==str(pid).lower())
+        except Exception:pass
+    hit=next((p for p in candidates if p.exists()),None)
+    return {"exists":bool(hit),"path":str(hit) if hit else None,"strings":_printable_strings(hit) if hit else []}
+
+
+def folder_configuration(folder, models, textures):
+    """Inventory resource naming/provenance and configuration evidence for one folder."""
+    model_rows=[dict(m) for m in models]
+    texture_rows=[dict(t) for t in textures]
+    product_models=[m for m in model_rows if resource_identity(m["filename"])["origin"]=="product"]
+    official_models=[m for m in model_rows if resource_identity(m["filename"])["origin"]=="official"]
+    product_textures=[t for t in texture_rows if resource_identity(t["filename"])["origin"]=="product"]
+    official_textures=[t for t in texture_rows if resource_identity(t["filename"])["origin"]=="official"]
+    parents=[]
+    for row in model_rows+texture_rows:
+        try:
+            p=Path(row["path"]).parent
+            if p not in parents:parents.append(p)
+        except Exception:pass
+    aconf=[]
+    for parent in parents:
+        try:
+            for p in parent.glob("*.aconf"):
+                ident=resource_identity(p.name)
+                aconf.append({"filename":p.name,"path":str(p),"origin":ident["origin"],"pid":ident["pid"]})
+        except Exception:pass
+    return {
+        "folder":folder,
+        "product_models":product_models,
+        "official_models":official_models,
+        "product_textures":product_textures,
+        "official_textures":official_textures,
+        "aconf":aconf,
+        "product_aconf":[x for x in aconf if x["origin"]=="product"],
+        "official_aconf":[x for x in aconf if x["origin"]=="official"],
+    }
+
+
+def enrich_assignments(assignments):
+    """Attach non-inferential sibling config evidence to resolver output."""
+    out=[]
+    for x in assignments:
+        y=dict(x);y["aconf"]=aconf_evidence(y["pid"],y["textures"]);out.append(y)
+    return out
