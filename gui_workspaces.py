@@ -414,7 +414,11 @@ class ResolvedVariantRenderTask(QThread):
             if self.cancel_event.is_set():
                 for future in futures:future.cancel()
         records.sort(key=lambda x:int(x["pid"]) if str(x["pid"]).isdigit() else str(x["pid"]))
-        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"completed":completed,"cancelled":self.cancelled,"failures":failures,"outputs":outputs,"records":records,"engine":"one-shot resolved-model"})
+        successful=[x for x in records if x["status"] in ("rendered","cached")]
+        binding_review=sum(1 for x in successful if x.get("unassigned_maps") or x.get("unused_linked_textures"))
+        binding_complete=len(successful)-binding_review
+        unsupported=sum(1 for x in records if x["status"]=="failed" and "SOM version" in (x.get("message") or ""))
+        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"completed":completed,"cancelled":self.cancelled,"failures":failures,"outputs":outputs,"records":records,"binding_complete":binding_complete,"binding_review":binding_review,"unsupported":unsupported,"engine":"one-shot resolved-model"})
 
 
 class VehicleVariantsPage(QWidget):
