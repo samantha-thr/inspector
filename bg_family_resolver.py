@@ -14,12 +14,16 @@ from there_texture_decoder import open_texture_image
 from there_model_decoder import decode_model
 
 
-CACHE_VERSION = 7
+CACHE_VERSION = 8
 CACHE_PATH = Path("cache/bg_family_resolution.json")
 REPORT_ROOT = Path("reports/bg_family_analysis")
 QUANTILES = (0.70, 0.80, 0.85)
 MIN_WINNER_SCORE = 0.18
 MIN_MARGIN = 0.035
+RELAXED_MIN_SCORE = 0.16
+RELAXED_MIN_MARGIN = 0.015
+CORROBORATED_MIN_SCORE = 0.17
+CORROBORATED_MIN_MARGIN = 0.020
 BACKGROUND_TOLERANCE = 38
 UV_OUTLINE_WEIGHT = 0.55
 TEMPLATE_OUTLINE_WEIGHT = 0.30
@@ -29,7 +33,7 @@ MIN_BORDER_BACKGROUND_SHARE = 0.15
 MIN_FOREGROUND_FRACTION = 0.04
 MAX_FOREGROUND_FRACTION = 0.96
 MIN_TEXTURE_STDDEV = 5.0
-ANALYSIS_ALGORITHM = "background-removed-uv-outline-v1"
+ANALYSIS_ALGORITHM = "background-removed-uv-outline-v2"
 
 
 def _slot(path):
@@ -281,6 +285,10 @@ def _analysis_fingerprint(anchor_fingerprint):
         "occupancy_weight":OCCUPANCY_WEIGHT,
         "min_winner_score":MIN_WINNER_SCORE,
         "min_margin":MIN_MARGIN,
+        "relaxed_min_score":RELAXED_MIN_SCORE,
+        "relaxed_min_margin":RELAXED_MIN_MARGIN,
+        "corroborated_min_score":CORROBORATED_MIN_SCORE,
+        "corroborated_min_margin":CORROBORATED_MIN_MARGIN,
         "min_border_background_share":MIN_BORDER_BACKGROUND_SHARE,
         "min_foreground_fraction":MIN_FOREGROUND_FRACTION,
         "max_foreground_fraction":MAX_FOREGROUND_FRACTION,
@@ -354,12 +362,17 @@ def analyze_bg_families(product_sets,models,rules=None):
     reuse_previous=bool(previous and previous.get("analysis_fingerprint")==analysis_fingerprint)
     previous_assignments=(previous.get("assignments") or {}) if reuse_previous else {}
     assignments={}
-    counts={"resolved":0,"ambiguous":0,"special":0,"missing_body":0,"low_information":0}
+    counts={"resolved":0,"resolved_strict":0,"resolved_outline_agreement":0,"resolved_corroborated":0,"ambiguous":0,"special":0,"missing_body":0,"low_information":0}
     reused=recomputed=0
 
     def count_assignment(item):
         method=item.get("method") or ""
-        if item.get("state")=="resolved":counts["resolved"]+=1
+        if item.get("state")=="resolved":
+            counts["resolved"]+=1
+            tier=item.get("confidence_tier")
+            if tier=="strict":counts["resolved_strict"]+=1
+            elif tier=="outline-agreement":counts["resolved_outline_agreement"]+=1
+            elif tier=="corroborated":counts["resolved_corroborated"]+=1
         elif method=="BG special/non-paintable family":counts["special"]+=1
         elif method=="BG low-information/solid-color texture":counts["low_information"]+=1
         elif method=="BG body texture unavailable":counts["missing_body"]+=1
@@ -440,13 +453,32 @@ def analyze_bg_families(product_sets,models,rules=None):
         margin=score80-second80
 
         # Independent evidence should agree before Inspector commits to a model.
-        # This intentionally prefers "unresolved" over a confident-looking wrong render.
+        # Start with the proven 14/14 strict gate, then admit two cautious
+        # "yes, but only with corroboration" paths so coverage can grow without
+        # returning to confident Bronco false positives.
         modalities=[uv_outline_scores,template_outline_scores]
         if candidate_occ["usable"]:
             modalities.extend([uv_precision_scores,{k:(v if v is not None else -1.0) for k,v in occupancy_scores.items()}])
         vote_count=sum(1 for scoreset in modalities if max(scoreset,key=scoreset.get)==winner)
+        uv_winner=max(uv_outline_scores,key=uv_outline_scores.get)
+        template_winner=max(template_outline_scores,key=template_outline_scores.get)
+        primary_agree=(uv_winner==winner and template_winner==winner)
+
+        strict_clear=(score80>=MIN_WINNER_SCORE and margin>=MIN_MARGIN and vote_count>=2)
+        outline_clear=(primary_agree and score80>=RELAXED_MIN_SCORE and margin>=RELAXED_MIN_MARGIN)
+        corroborated_clear=(vote_count>=3 and score80>=CORROBORATED_MIN_SCORE and margin>=CORROBORATED_MIN_MARGIN)
+
+        if strict_clear:
+            confidence_tier="strict"
+        elif outline_clear:
+            confidence_tier="outline-agreement"
+        elif corroborated_clear:
+            confidence_tier="corroborated"
+        else:
+            confidence_tier=None
+
         anchor=next(a for a in anchors if a["model"]==winner)
-        clear=(score80>=MIN_WINNER_SCORE and margin>=MIN_MARGIN and vote_count>=2)
+        clear=confidence_tier is not None
 
         if not clear:
             state="unresolved";method="BG template family ambiguous";model=None;counts["ambiguous"]+=1
@@ -454,11 +486,16 @@ def analyze_bg_families(product_sets,models,rules=None):
             state="unresolved";method="BG special/non-paintable family";model=None;counts["special"]+=1
         else:
             state="resolved";method="BG background-removed UV outline match";model=winner;counts["resolved"]+=1
+            if confidence_tier=="strict":counts["resolved_strict"]+=1
+            elif confidence_tier=="outline-agreement":counts["resolved_outline_agreement"]+=1
+            elif confidence_tier=="corroborated":counts["resolved_corroborated"]+=1
 
         assignments[str(pid)]={
             "state":state,"method":method,"model":model,
             "family_model":winner,"template":anchor["template"],"paintable":anchor["paintable"],
             "score":round(score80,6),"margin":round(margin,6),"votes":vote_count,
+            "confidence_tier":confidence_tier,"primary_agree":primary_agree,
+            "uv_winner":uv_winner,"template_winner":template_winner,
             "scores":{k:round(v,6) for k,v in combined.items()},
             "uv_scores":{k:round(v,6) for k,v in uv_scores.items()},
             "uv_metrics":{k:{mk:round(mv,6) for mk,mv in vals.items()} for k,vals in uv_metrics.items()},
@@ -477,6 +514,8 @@ def analyze_bg_families(product_sets,models,rules=None):
         "algorithm":ANALYSIS_ALGORITHM,
         "thresholds":{
             "quantiles":QUANTILES,"min_winner_score":MIN_WINNER_SCORE,"min_margin":MIN_MARGIN,
+            "relaxed_min_score":RELAXED_MIN_SCORE,"relaxed_min_margin":RELAXED_MIN_MARGIN,
+            "corroborated_min_score":CORROBORATED_MIN_SCORE,"corroborated_min_margin":CORROBORATED_MIN_MARGIN,
             "background_tolerance":BACKGROUND_TOLERANCE,
             "uv_outline_weight":UV_OUTLINE_WEIGHT,"template_outline_weight":TEMPLATE_OUTLINE_WEIGHT,
             "uv_precision_weight":UV_PRECISION_WEIGHT,"occupancy_weight":OCCUPANCY_WEIGHT,
@@ -506,9 +545,9 @@ def _write_report(payload):
     with open(cp,"w",newline="",encoding="utf-8-sig") as fh:
         w=csv.writer(fh)
         models=[a["model"] for a in payload.get("anchors",[])]
-        w.writerow(["pid","state","method","family_model","template","score","margin","votes","foreground_fraction","outline_fraction","border_background_share","stddev",*[f"combined:{m}" for m in models],*[f"uv_outline:{m}" for m in models],*[f"template_outline:{m}" for m in models],*[f"uv_precision:{m}" for m in models],*[f"uv_dice:{m}" for m in models],*[f"occupancy:{m}" for m in models]])
+        w.writerow(["pid","state","method","confidence_tier","primary_agree","uv_winner","template_winner","family_model","template","score","margin","votes","foreground_fraction","outline_fraction","border_background_share","stddev",*[f"combined:{m}" for m in models],*[f"uv_outline:{m}" for m in models],*[f"template_outline:{m}" for m in models],*[f"uv_precision:{m}" for m in models],*[f"uv_dice:{m}" for m in models],*[f"occupancy:{m}" for m in models]])
         for pid,x in sorted(payload.get("assignments",{}).items(),key=lambda kv:int(kv[0]) if kv[0].isdigit() else kv[0]):
-            occ=x.get("occupancy") or {};w.writerow([pid,x.get("state"),x.get("method"),x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),occ.get("foreground_fraction",""),occ.get("outline_fraction",""),occ.get("border_background_share",""),occ.get("stddev",""),*[x.get("scores",{}).get(m,"") for m in models],*[x.get("uv_outline_scores",{}).get(m,"") for m in models],*[x.get("template_outline_scores",{}).get(m,"") for m in models],*[x.get("uv_precision_scores",{}).get(m,"") for m in models],*[x.get("uv_scores",{}).get(m,"") for m in models],*[x.get("occupancy_scores",{}).get(m,"") for m in models]])
+            occ=x.get("occupancy") or {};w.writerow([pid,x.get("state"),x.get("method"),x.get("confidence_tier",""),x.get("primary_agree",""),x.get("uv_winner",""),x.get("template_winner",""),x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),occ.get("foreground_fraction",""),occ.get("outline_fraction",""),occ.get("border_background_share",""),occ.get("stddev",""),*[x.get("scores",{}).get(m,"") for m in models],*[x.get("uv_outline_scores",{}).get(m,"") for m in models],*[x.get("template_outline_scores",{}).get(m,"") for m in models],*[x.get("uv_precision_scores",{}).get(m,"") for m in models],*[x.get("uv_scores",{}).get(m,"") for m in models],*[x.get("occupancy_scores",{}).get(m,"") for m in models]])
     payload["report_csv"]=str(cp)
     payload["report_json"]=str(jp)
 
