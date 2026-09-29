@@ -752,7 +752,7 @@ class VehicleVariantsPage(QWidget):
         shown=[]
         def matches(x):
             mode=flt.currentText()
-            return mode=="All" or (mode=="Resolved" and x["state"]=="resolved") or (mode=="Unresolved" and x["state"]=="unresolved") or (mode=="Exact PID" and x["method"]=="exact PID model") or (mode=="Official default" and x["method"]=="official default model") or (mode=="BG template family" and x["method"]=="BG structural family match")
+            return mode=="All" or (mode=="Resolved" and x["state"]=="resolved") or (mode=="Unresolved" and x["state"]=="unresolved") or (mode=="Exact PID" and x["method"]=="exact PID model") or (mode=="Official default" and x["method"]=="official default model") or (mode=="BG template family" and x["method"] in ("BG structural family match","BG background-normalized family match","BG model UV family match","verified BG template family"))
         def populate():
             nonlocal shown
             shown=[x for x in assignments if matches(x)];table.setRowCount(len(shown))
