@@ -9,6 +9,7 @@ from config import APP_NAME, DATABASE_PATH, DEFAULT_SCAN_PATH
 from there_texture_decoder import open_texture_image
 from model_converter import SUPPORTED_OUTPUTS, conversion_readiness, execute_conversion_job, inspect_conversion_source, prepare_conversion_job
 from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thumbnail_cache, thumbnail_failure_count, thumbnail_failures, clear_thumbnail_failure, remove_cached_thumbnail, render_metadata, RENDER_VERSION, cached_variant_thumbnail, render_model_variant, remove_cached_variant, PersistentVariantWorker
+from uv_intelligence import analyze_model_uv, compare_uv_fingerprints
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -388,7 +389,8 @@ class VehicleVariantsPage(QWidget):
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete All Renders");self.delete_all_button.clicked.connect(self.delete_all_variants)
         self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[]
-        for w in (QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,render,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
+        uv_analyze=QPushButton("Analyze UV Families");uv_analyze.clicked.connect(self.analyze_uv_families);self.uv_analyze_button=uv_analyze
+        for w in (QLabel("Workers"),self.workers,QLabel("Engine"),self.engine,uv_analyze,render,self.cancel_button,self.failures_button,self.delete_all_button):action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
         self.compatibility=QLabel("Select the correct model/template before rendering.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
@@ -518,6 +520,57 @@ class VehicleVariantsPage(QWidget):
         elif self.model:
             self.compatibility.setText(f"Choose the reference template that belongs to {self.model['filename']}. Inspector will not infer template→model relationships.")
         self.status.setText(f"{len(self.sets):,} PID sets • {scored:,} analyzed • {len(compatible):,} match selected template • {unscored:,} could not be scored • {cached:,} rendered")
+    def analyze_uv_families(self):
+        """Decode every model in the selected folder and group exact LOD0 UV layouts."""
+        folder=self.folder_name();models=self.db.models_in_folder(folder,10000)
+        if not models:
+            QMessageBox.information(self,APP_NAME,f"No indexed models were found in {folder}.");return
+        self.uv_analyze_button.setEnabled(False);self.status.setText(f"Analyzing LOD0 UV topology for {len(models):,} {folder} model(s)…");QApplication.processEvents()
+        results=[];failures=[]
+        for i,row in enumerate(models,1):
+            try:
+                info=analyze_model_uv(row["path"],0)
+                results.append((dict(row),info))
+                self.status.setText(f"UV analysis {i:,} / {len(models):,} • {row['filename']}")
+                QApplication.processEvents()
+            except Exception as exc:
+                failures.append((dict(row),str(exc)))
+        self.uv_analyze_button.setEnabled(True)
+        families={}
+        for row,info in results:
+            families.setdefault(info["layout_sha256"],[]).append((row,info))
+
+        d=QDialog(self);d.setWindowTitle(f"UV Families — {folder}");d.resize(1180,760);v=QVBoxLayout(d)
+        summary=QLabel(f"{len(results):,} models analyzed • {len(families):,} exact LOD0 UV families • {len(failures):,} decode failure(s).  Families are derived from model UV coordinates, not texture artwork.")
+        summary.setWordWrap(True);v.addWidget(summary)
+        split=QSplitter(Qt.Horizontal);table=QTableWidget(0,5);table.setHorizontalHeaderLabels(["Family","Models","Triangles","UV points","Layout fingerprint"]);table.setSelectionBehavior(QAbstractItemView.SelectRows);table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        preview=QWidget();pv=QVBoxLayout(preview);image=QLabel("Select a UV family");image.setAlignment(Qt.AlignCenter);image.setMinimumSize(500,500);details=QPlainTextEdit();details.setReadOnly(True);details.setMaximumHeight(170);pv.addWidget(image,1);pv.addWidget(details)
+        family_rows=[]
+        for family_no,(digest,members) in enumerate(sorted(families.items(),key=lambda x:(-len(x[1]),x[0])),1):
+            family_rows.append((family_no,digest,members))
+        table.setRowCount(len(family_rows))
+        for r,(family_no,digest,members) in enumerate(family_rows):
+            info=members[0][1];names=", ".join(x[0]["filename"] for x in members)
+            vals=(f"UV-{family_no:02d}",names,str(info["triangle_count"]),str(info["unique_uv_points"]),digest[:16]+"…")
+            for c,val in enumerate(vals):table.setItem(r,c,QTableWidgetItem(val))
+        table.horizontalHeader().setSectionResizeMode(1,QHeaderView.Stretch);table.horizontalHeader().setSectionResizeMode(4,QHeaderView.Stretch)
+        def selected():
+            r=table.currentRow()
+            if r<0:return
+            family_no,digest,members=family_rows[r];row,info=members[0]
+            pix=QPixmap(info["wireframe"])
+            if not pix.isNull():image.setPixmap(pix.scaled(520,520,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+            else:image.setText("Wireframe preview unavailable")
+            lines=[f"UV-{family_no:02d}",f"layout_sha256: {digest}",f"material_topology_sha256: {info['topology_sha256']}",f"models: {', '.join(x[0]['filename'] for x in members)}",f"triangles: {info['triangle_count']}",f"unique UV points: {info['unique_uv_points']}",f"bounds: {info['bounds']}",f"wireframe: {info['wireframe']}"]
+            details.setPlainText("\n".join(lines))
+        table.itemSelectionChanged.connect(selected);split.addWidget(table);split.addWidget(preview);split.setStretchFactor(0,1);split.setStretchFactor(1,1);v.addWidget(split,1)
+        if failures:
+            fail=QLabel("Failures: "+" | ".join(f"{x[0]['filename']}: {x[1]}" for x in failures));fail.setWordWrap(True);v.addWidget(fail)
+        close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close)
+        if family_rows:table.selectRow(0)
+        d.exec()
+        self.status.setText(f"UV analysis complete • {len(results):,} models • {len(families):,} exact LOD0 UV families • {len(failures):,} failures")
+
     def delete_variant(self,paths):
         if not self.model:return
         remove_cached_variant(self.model["path"],paths);self.refresh()
