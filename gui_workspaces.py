@@ -670,6 +670,7 @@ class VehicleVariantsPage(QWidget):
             f"Resolved to paintable BG families: {counts.get('resolved',0):,}",
             f"Ambiguous / unresolved: {counts.get('ambiguous',0):,}",
             f"Special or non-paintable family matches: {counts.get('special',0):,}",
+            f"Low-information / solid-color textures: {counts.get('low_information',0):,}",
             f"Missing body texture: {counts.get('missing_body',0):,}",
             "",
             "Verified reference families:"
@@ -681,7 +682,7 @@ class VehicleVariantsPage(QWidget):
         note=QLabel("Only structurally separated products are resolved. Ambiguous products remain unresolved and are excluded from rendering.")
         note.setWordWrap(True);v.addWidget(note)
         close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
-        self.status.setText(f"BG analysis complete • {counts.get('resolved',0):,} resolved • {counts.get('ambiguous',0):,} ambiguous • {counts.get('special',0):,} special/non-paintable")
+        self.status.setText(f"BG analysis complete • {counts.get('resolved',0):,} resolved • {counts.get('ambiguous',0):,} ambiguous • {counts.get('low_information',0):,} low-information • {counts.get('special',0):,} special/non-paintable")
 
     def show_folder_configuration(self):
         folder=self.folder_name();models=self.db.models_in_folder(folder,10000);textures=self.db.textures_in_folder(folder,100000)
