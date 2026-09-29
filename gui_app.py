@@ -3,7 +3,7 @@ import sys
 import time
 from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSettings
-from PySide6.QtGui import QPixmap, QKeySequence, QShortcut
+from PySide6.QtGui import QPixmap, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import *
 from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
 from scanner import scan_folder, scan_textures
@@ -56,7 +56,7 @@ class Browser(Page):
         super().__init__(title,"Search and inspect indexed assets"); self.db=db; self.kind=kind; self.page=0
         row=QHBoxLayout(); self.search=QLineEdit(); self.search.setPlaceholderText("Filename, folder, path or hash")
         b=QPushButton("Search"); b.clicked.connect(self.reset_search); self.search.returnPressed.connect(self.reset_search)
-        self.limit=QComboBox(); self.limit.addItems(["250","500","1000","2500","5000"]); self.limit.setCurrentText("1000")
+        self.limit=QComboBox(); self.limit.addItems(["250","500","1000","2500","5000"]); self.limit.setCurrentText("250")
         row.addWidget(self.search,1); row.addWidget(QLabel("Rows")); row.addWidget(self.limit); row.addWidget(b); self.box.addLayout(row)
         self.table=QTableWidget(0,6); self.table.setHorizontalHeaderLabels(["Preview","Filename","Folder","Path","Details","Status"]); self.table.setSortingEnabled(True)
         self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.Stretch); self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -80,7 +80,7 @@ class Browser(Page):
             preview=QTableWidgetItem()
             if self.kind=="model":
                 p=cached_thumbnail(x["path"],512)
-                if p: preview.setIcon(QPixmap(str(p))); preview.setToolTip("Cached LOD0 render")
+                if p: preview.setIcon(QIcon(str(p))); preview.setToolTip("Cached LOD0 render")
                 vals=(x["filename"],x["folder"],x["relative_path"],f"{int(x['size'] or 0):,} bytes",(x["sha256"] or "")[:16])
             else:
                 vals=(x["filename"],x["folder"],x["relative_path"],f"{x['width'] or x['dds_width'] or 0} x {x['height'] or x['dds_height'] or 0}",x["dds_format"] or x["analysis_status"])
@@ -265,6 +265,8 @@ class Placeholder(Page):
         self.box.addWidget(c,1)
 
 class MainWindow(QMainWindow):
+    PAGE_COUNT=14
+
     def __init__(self):
         super().__init__(); self.db=Database()
         self.setWindowTitle(f"{APP_NAME} {VERSION}"); self.resize(1450,900); self.setMinimumSize(1050,680)
@@ -289,11 +291,33 @@ class MainWindow(QMainWindow):
         sb.addWidget(self.nav,1)
         db_label=QLabel("Database" + chr(10) + str(DATABASE_PATH)); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
         sb.addWidget(db_label); shell.addWidget(side)
+
         self.stack=QStackedWidget()
-        pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),ThumbnailStudio(self.db),VehicleVariantsPage(self.db),IntelligencePage(self.db),Evidence(self.db),ReviewQueue(self.db),
-               ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),DiagnosticsPage(self.db),SettingsPage(self.db)]
-        for p in pages:self.stack.addWidget(p)
+        self._pages={}
+        self._dirty_pages=set()
+        self._page_factories={
+            0:lambda:Dashboard(self.db),
+            1:lambda:Browser(self.db,"model"),
+            2:lambda:Browser(self.db,"texture"),
+            3:lambda:ThumbnailStudio(self.db),
+            4:lambda:VehicleVariantsPage(self.db),
+            5:lambda:IntelligencePage(self.db),
+            6:lambda:Evidence(self.db),
+            7:lambda:ReviewQueue(self.db),
+            8:lambda:ComparePage(self.db),
+            9:lambda:ConvertPage(),
+            10:lambda:KnowledgePage(self.db),
+            11:lambda:Analysis(self.refresh_all),
+            12:lambda:DiagnosticsPage(self.db),
+            13:lambda:SettingsPage(self.db),
+        }
+        for _ in range(self.PAGE_COUNT):
+            holder=QWidget(); lay=QVBoxLayout(holder); lay.addStretch()
+            msg=QLabel("Workspace loads when opened"); msg.setAlignment(Qt.AlignCenter); msg.setObjectName("muted")
+            lay.addWidget(msg); lay.addStretch(); self.stack.addWidget(holder)
+        self._ensure_page(0)
         shell.addWidget(self.stack,1)
+
         self.nav.currentItemChanged.connect(self._nav_changed)
         self.nav.setCurrentItem(self.nav_items[0])
         self.statusBar().showMessage(f"{self.db.count_models():,} models • {self.db.count_textures():,} textures • {DATABASE_PATH}")
@@ -301,18 +325,46 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+1"),self,activated=lambda:self.select_page(0))
         QShortcut(QKeySequence("Ctrl+2"),self,activated=lambda:self.select_page(1))
         QShortcut(QKeySequence("Ctrl+3"),self,activated=lambda:self.select_page(2))
+
+    def _ensure_page(self,index):
+        page=self._pages.get(index)
+        if page is None:
+            factory=self._page_factories.get(index)
+            if factory is None:return None
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                page=factory()
+                old=self.stack.widget(index)
+                self.stack.removeWidget(old); old.deleteLater()
+                self.stack.insertWidget(index,page)
+                self._pages[index]=page
+            finally:
+                QApplication.restoreOverrideCursor()
+        elif index in self._dirty_pages and hasattr(page,"refresh"):
+            page.refresh()
+        self._dirty_pages.discard(index)
+        return page
+
     def _nav_changed(self,current,previous):
         if current is None:return
         index=current.data(0,Qt.UserRole)
-        if index is not None:self.stack.setCurrentIndex(int(index))
+        if index is None:return
+        self._ensure_page(int(index))
+        self.stack.setCurrentIndex(int(index))
+
     def select_page(self,index):
         item=self.nav_items.get(index)
         if item:self.nav.setCurrentItem(item)
+
     def refresh_all(self):
-        for i in range(self.stack.count()):
-            page = self.stack.widget(i)
-            if hasattr(page, "refresh"):
-                page.refresh()
+        current=self.stack.currentIndex()
+        for index in list(self._pages):
+            if index not in (0,current):self._dirty_pages.add(index)
+        for index in dict.fromkeys((0,current)):
+            page=self._pages.get(index)
+            if page is not None and hasattr(page,"refresh"):page.refresh()
+            self._dirty_pages.discard(index)
+        self.statusBar().showMessage(f"{self.db.count_models():,} models • {self.db.count_textures():,} textures • {DATABASE_PATH}")
 
     def closeEvent(self,event):
         self.db.close(); super().closeEvent(event)
