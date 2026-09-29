@@ -408,7 +408,7 @@ class ResolvedVariantRenderTask(QThread):
                 bind_summary=next((b for b in bindings if b.get("summary")),{})
                 record={"pid":item["pid"],"state":item.get("state","resolved"),"method":item.get("method",""),"model":item["model"]["filename"],"model_path":item["model"]["path"],"textures":list(item["textures"]),"texture_count":len(item["textures"]),"status":status,"output":result.get("output") or "","cached":bool(result.get("cached")),"returncode":result.get("returncode"),"message":result.get("message") or "","binding_profile":result.get("binding_profile") or "","material_count":bind_summary.get("material_count",""),"color_material_count":bind_summary.get("color_material_count",""),"assigned_material_count":bind_summary.get("assigned_material_count",""),"unassigned_color_materials":bind_summary.get("unassigned_color_materials",[]),"unused_linked_textures":bind_summary.get("unused_linked_textures",[]),"texture_bindings":bindings}
                 records.append(record)
-                if result.get("success"):outputs.append({"pid":item["pid"],"model":item["model"],"textures":item["textures"],"output":result.get("output"),"cached":bool(result.get("cached"))})
+                if result.get("success"):outputs.append({"pid":item["pid"],"model":item["model"],"textures":item["textures"],"output":result.get("output"),"cached":bool(result.get("cached")),"binding_profile":result.get("binding_profile") or "","binding_summary":bind_summary})
                 elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
                 self.progress.emit(completed,total,item["pid"],rate,remaining)
             if self.cancel_event.is_set():
@@ -709,7 +709,7 @@ class VehicleVariantsPage(QWidget):
             card=QFrame();card.setObjectName("card");cv=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);p=QPixmap(str(x["output"]))
             if not p.isNull():im.setPixmap(p.scaled(240,190,Qt.KeepAspectRatio,Qt.SmoothTransformation))
             else:im.setText("Preview unavailable")
-            cv.addWidget(im);lab=QLabel(f"PID {x['pid']}\n{x['model']['filename']}");lab.setAlignment(Qt.AlignCenter);lab.setWordWrap(True);cv.addWidget(lab);grid.addWidget(card,i//4,i%4)
+            cv.addWidget(im);lab=QLabel(f"PID {x['pid']}\n{x['model']['filename']}");lab.setAlignment(Qt.AlignCenter);lab.setWordWrap(True);cv.addWidget(lab)\n            bs=x.get("binding_summary") or {};bind=QLabel(f"{x.get('binding_profile') or 'binding unknown'} • assigned {bs.get('assigned_material_count','?')}/{bs.get('color_material_count','?')} color materials");bind.setAlignment(Qt.AlignCenter);bind.setWordWrap(True);bind.setStyleSheet("color:#8f98a3");cv.addWidget(bind)\n            if bs.get("unassigned_color_materials") or bs.get("unused_linked_textures"):\n                warn=QLabel(f"Binding review • unassigned: {len(bs.get('unassigned_color_materials',[]))} • unused textures: {len(bs.get('unused_linked_textures',[]))}");warn.setAlignment(Qt.AlignCenter);warn.setWordWrap(True);cv.addWidget(warn)\n            grid.addWidget(card,i//4,i%4)
         if not outputs:grid.addWidget(QLabel("No successful renders."),0,0)
         area.setWidget(host);v.addWidget(area,1)
         buttons=QHBoxLayout();export=QPushButton("Export Results");export.clicked.connect(lambda:self.export_last_render(d));buttons.addWidget(export);buttons.addStretch();bb=QDialogButtonBox(QDialogButtonBox.Close);bb.rejected.connect(d.reject);buttons.addWidget(bb);v.addLayout(buttons);d.exec()
