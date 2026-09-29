@@ -9,7 +9,7 @@ from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
 from scanner import scan_folder, scan_textures
 from analysis_engine import rebuild_links, rebuild_families, rebuild_texture_families, rebuild_evidence, rebuild_texture_evidence
 from database import Database
-from gui_workspaces import AssetDialog, ComparePage, ConvertPage, KnowledgePage, SettingsPage, ThumbnailStudio, DiagnosticsPage, VehicleVariantsPage, texture_pixmap
+from gui_workspaces import AssetDialog, ComparePage, ConvertPage, KnowledgePage, SettingsPage, ThumbnailStudio, DiagnosticsPage, VehicleVariantsPage, IntelligencePage, texture_pixmap
 from model_thumbnail import cached_thumbnail
 
 BG="#101215"; PANEL="#181b20"; CYAN="#43e8e8"; TEXT="#e8eaed"; MUTED="#8f98a3"
@@ -276,9 +276,9 @@ class MainWindow(QMainWindow):
         nav_groups=[
             ("Home",[("Dashboard",0)]),
             ("Assets",[("Models",1),("Textures",2),("Visual Library",3),("Vehicle Variants",4)]),
-            ("Forensics",[("Evidence",5),("Review Queue",6),("Compare",7)]),
-            ("Tools",[("Convert",8),("Knowledge",9),("Scan & Analysis",10)]),
-            ("System",[("Diagnostics",11),("Settings",12)]),
+            ("Forensics",[("Intelligence",5),("Evidence",6),("Review Queue",7),("Compare",8)]),
+            ("Tools",[("Convert",9),("Knowledge",10),("Scan & Analysis",11)]),
+            ("System",[("Diagnostics",12),("Settings",13)]),
         ]
         self.nav_items={}
         for group,items in nav_groups:
@@ -290,7 +290,7 @@ class MainWindow(QMainWindow):
         db_label=QLabel("Database" + chr(10) + str(DATABASE_PATH)); db_label.setWordWrap(True); db_label.setObjectName("muted"); db_label.setToolTip(str(DATABASE_PATH))
         sb.addWidget(db_label); shell.addWidget(side)
         self.stack=QStackedWidget()
-        pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),ThumbnailStudio(self.db),VehicleVariantsPage(self.db),Evidence(self.db),ReviewQueue(self.db),
+        pages=[Dashboard(self.db),Browser(self.db,"model"),Browser(self.db,"texture"),ThumbnailStudio(self.db),VehicleVariantsPage(self.db),IntelligencePage(self.db),Evidence(self.db),ReviewQueue(self.db),
                ComparePage(self.db),ConvertPage(),KnowledgePage(self.db),Analysis(self.refresh_all),DiagnosticsPage(self.db),SettingsPage(self.db)]
         for p in pages:self.stack.addWidget(p)
         shell.addWidget(self.stack,1)
