@@ -718,7 +718,7 @@ class VehicleVariantsPage(QWidget):
         if result.get("report_csv"):
             lines += ["",f"CSV report: {result['report_csv']}",f"JSON report: {result.get('report_json','')}"]
         text.setPlainText("\n".join(lines));v.addWidget(text,1)
-        note=QLabel("Resolution removes each texture's background and compares the remaining outline with decoded model UV-island boundaries and verified stock-template outlines. Strict matches are preserved; near-matches are accepted only when the primary outlines agree or multiple independent signals corroborate the same model.")
+        note=QLabel("Resolution removes each texture's background and compares the remaining outline with decoded model UV-island boundaries and verified stock-template outlines. The CSV report includes per-PID acceptance reasons, threshold gaps, confidence tier, votes, and every per-model component score so accepted and rejected products can be compared directly.")
         note.setWordWrap(True);v.addWidget(note)
         close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
         self.status.setText(f"BG analysis complete • {counts.get('resolved',0):,} resolved • {counts.get('ambiguous',0):,} ambiguous • {counts.get('low_information',0):,} low-information • {counts.get('special',0):,} special/non-paintable")
