@@ -8,7 +8,7 @@ from pathlib import Path
 from there_model_decoder import decode_model
 
 
-FORENSIC_VERSION = 1
+FORENSIC_VERSION = 2
 CACHE_DIR = Path("cache/model_forensics")
 
 
@@ -56,7 +56,8 @@ def model_facts(path,force=False):
         uv=sorted(t for g in uv_groups for t in g["triangles"])
         lods.append({"lod":li,"mesh_count":len(lod.meshes),"vertex_count":vertices,"triangle_count":triangles,
                      "geometry":_digest(geom),"geometry_material":_digest(geom_groups),
-                     "uv":_digest(uv),"uv_material":_digest(uv_groups)})
+                     "uv":_digest(uv),"uv_material":_digest(uv_groups),
+                     "geometry_triangles":geom,"uv_triangles":uv})
     collision=None
     if m.collision:
         verts=sorted(tuple(_q(x) for x in v) for v in m.collision.vertices)
@@ -67,32 +68,47 @@ def model_facts(path,force=False):
     cache.parent.mkdir(parents=True,exist_ok=True);cache.write_text(json.dumps(data,indent=2),encoding="utf-8");return data
 
 
+def _overlap(a,b):
+    """Set intersection measurements; returned percentages are descriptive, not confidence."""
+    sa=set(tuple(tuple(p) for p in tri) for tri in a);sb=set(tuple(tuple(p) for p in tri) for tri in b)
+    shared=len(sa & sb)
+    return shared,len(sa),len(sb),(100.0*shared/len(sa) if sa else 0.0),(100.0*shared/len(sb) if sb else 0.0)
+
+
 def analyze_model_rows(rows):
-    """Return only relationships proven by equal deterministic fingerprints."""
+    """Exact evidence plus measured structural overlap. No confidence thresholds."""
     decoded=[];unsupported=[]
     for row in rows:
         try:decoded.append((dict(row),model_facts(row["path"])))
         except Exception as exc:unsupported.append({"filename":row["filename"],"path":row["path"],"reason":str(exc)})
-    buckets=defaultdict(list)
-    for row,fact in decoded:
-        for lod in fact["lods"]:
-            for key,label in (("geometry","Exact geometry"),("geometry_material","Exact geometry + material assignment"),
-                              ("uv","Exact UV layout"),("uv_material","Exact UV layout + material assignment")):
-                buckets[(lod["lod"],key,label,lod[key])].append((row,fact,lod))
-        if fact["collision"]:
-            buckets[(-1,"collision","Exact collision geometry",fact["collision"]["fingerprint"])].append((row,fact,None))
-    rel=[];seen=set()
-    for (lod,key,label,digest),members in buckets.items():
-        if len(members)<2:continue
-        for i in range(len(members)):
-            for j in range(i+1,len(members)):
-                a=members[i][0];b=members[j][0];pair=tuple(sorted((a["path"],b["path"])))
-                unique=(pair,lod,key)
-                if unique in seen:continue
-                seen.add(unique)
-                rel.append({"asset_a":a["path"],"asset_b":b["path"],"filename_a":a["filename"],"filename_b":b["filename"],
-                            "lod":lod,"evidence":label,"fingerprint":digest})
-    # Exact file duplicates come from the indexed SHA and do not require decoding.
+    relationships=[];counts=defaultdict(int)
+    # Every decoded pair is measured. Nothing is promoted or hidden by an arbitrary cutoff.
+    for i in range(len(decoded)):
+        for j in range(i+1,len(decoded)):
+            ra,fa=decoded[i];rb,fb=decoded[j]
+            common=min(len(fa["lods"]),len(fb["lods"]))
+            for li in range(common):
+                a=fa["lods"][li];b=fb["lods"][li]
+                gs,ga,gb,gpa,gpb=_overlap(a["geometry_triangles"],b["geometry_triangles"])
+                us,ua,ub,upa,upb=_overlap(a["uv_triangles"],b["uv_triangles"])
+                exact=[]
+                if a["geometry"]==b["geometry"]:exact.append("Exact geometry")
+                if a["geometry_material"]==b["geometry_material"]:exact.append("Exact geometry + material assignment")
+                if a["uv"]==b["uv"]:exact.append("Exact UV layout")
+                if a["uv_material"]==b["uv_material"]:exact.append("Exact UV layout + material assignment")
+                if gs or us or exact:
+                    evidence="; ".join(exact) if exact else "Measured structural overlap"
+                    detail=f"Geometry: {gs:,} shared of A {ga:,} / B {gb:,} ({gpa:.1f}% A, {gpb:.1f}% B) • UV: {us:,} shared of A {ua:,} / B {ub:,} ({upa:.1f}% A, {upb:.1f}% B)"
+                    relationships.append({"asset_a":ra["path"],"asset_b":rb["path"],"filename_a":ra["filename"],"filename_b":rb["filename"],
+                        "lod":li,"evidence":evidence,"fingerprint":a["geometry"] if exact else "", "details":detail,
+                        "geometry_shared":gs,"geometry_a":ga,"geometry_b":gb,"uv_shared":us,"uv_a":ua,"uv_b":ub})
+                    counts[evidence]+=1
+            ca=fa.get("collision");cb=fb.get("collision")
+            if ca and cb and ca["fingerprint"]==cb["fingerprint"]:
+                relationships.append({"asset_a":ra["path"],"asset_b":rb["path"],"filename_a":ra["filename"],"filename_b":rb["filename"],
+                    "lod":-1,"evidence":"Exact collision geometry","fingerprint":ca["fingerprint"],"details":f"Collision identical: {ca['vertices']:,} vertices, {ca['polygons']:,} polygons.",
+                    "geometry_shared":0,"geometry_a":0,"geometry_b":0,"uv_shared":0,"uv_a":0,"uv_b":0})
+                counts["Exact collision geometry"]+=1
     sha=defaultdict(list)
     for row in rows:
         if row["sha256"]:sha[row["sha256"]].append(dict(row))
@@ -100,9 +116,10 @@ def analyze_model_rows(rows):
         if len(members)<2:continue
         for i in range(len(members)):
             for j in range(i+1,len(members)):
-                a,b=members[i],members[j];rel.append({"asset_a":a["path"],"asset_b":b["path"],"filename_a":a["filename"],"filename_b":b["filename"],
-                                                     "lod":-1,"evidence":"Exact file duplicate","fingerprint":digest})
-    rel.sort(key=lambda x:(x["filename_a"].lower(),x["filename_b"].lower(),x["lod"],x["evidence"]))
-    counts=defaultdict(int)
-    for x in rel:counts[x["evidence"]]+=1
-    return {"models":len(rows),"decoded":len(decoded),"unsupported":unsupported,"relationships":rel,"counts":dict(counts)}
+                a,b=members[i],members[j]
+                relationships.append({"asset_a":a["path"],"asset_b":b["path"],"filename_a":a["filename"],"filename_b":b["filename"],
+                    "lod":-1,"evidence":"Exact file duplicate","fingerprint":digest,"details":"Indexed SHA-256 is identical.",
+                    "geometry_shared":0,"geometry_a":0,"geometry_b":0,"uv_shared":0,"uv_a":0,"uv_b":0})
+                counts["Exact file duplicate"]+=1
+    relationships.sort(key=lambda x:(x["filename_a"].lower(),x["filename_b"].lower(),x["lod"],x["evidence"]))
+    return {"models":len(rows),"decoded":len(decoded),"unsupported":unsupported,"relationships":relationships,"counts":dict(counts)}
