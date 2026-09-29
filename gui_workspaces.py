@@ -472,10 +472,10 @@ class VehicleVariantsPage(QWidget):
         select_row.setStretch(1,3);select_row.addStretch();b.addLayout(select_row)
         action_row=QHBoxLayout();self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2")
         self.engine=QComboBox();self.engine.addItems(["One-shot (safe)","Persistent (experimental)"]);self.engine.setCurrentIndex(0);self.engine.setMinimumWidth(165)
-        self.render_button=QPushButton("Render Resolved Missing");self.render_button.clicked.connect(self.render_all_resolved)
+        self.render_button=QPushButton("Feed Inspector — All Resolved");self.render_button.setToolTip("Render every missing resolver-approved product in the selected folder; unresolved products are skipped");self.render_button.clicked.connect(self.render_all_resolved)
         self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete Resolved Renders");self.delete_all_button.clicked.connect(self.delete_all_resolved_variants)
-        self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[];self.last_render_report=None
+        self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[];self.last_render_report=None;self.last_auto_report=None
         self.export_render_button=QPushButton("Export Last Render");self.export_render_button.setEnabled(False);self.export_render_button.clicked.connect(self.export_last_render)
         uv_analyze=QPushButton("Analyze UV Families");uv_analyze.clicked.connect(self.analyze_uv_families);self.uv_analyze_button=uv_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
