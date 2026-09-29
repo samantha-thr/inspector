@@ -381,20 +381,7 @@ def analyze_bg_families(product_sets,models,rules=None):
     for pid,paths in product_sets:
         body=next((Path(p) for p in paths if _slot(p)==1),None)
         if body is None or not body.exists():
-            # Evidence confidence is intentionally separate from winner margin.
-        # Similar UV families can be genuine near-ties, so confidence should reflect
-        # the quality and agreement of the evidence rather than separation alone.
-        evidence_parts=[
-            max(0.0,min(1.0,uv_outline_scores.get(winner,0.0))),
-            max(0.0,min(1.0,template_outline_scores.get(winner,0.0))),
-            max(0.0,min(1.0,uv_precision_scores.get(winner,0.0))),
-            max(0.0,min(1.0,vote_count/4.0)),
-            1.0 if primary_agree else 0.0,
-        ]
-        evidence_confidence=sum(evidence_parts)/len(evidence_parts)
-        evidence_band="strong" if evidence_confidence>=0.72 else ("moderate" if evidence_confidence>=0.60 else "limited")
-
-        assignments[str(pid)]={"state":"unresolved","method":"BG body texture unavailable","model":None}
+            assignments[str(pid)]={"state":"unresolved","method":"BG body texture unavailable","model":None}
             counts["missing_body"]+=1
             continue
 
@@ -529,6 +516,18 @@ def analyze_bg_families(product_sets,models,rules=None):
             if confidence_tier=="strict":counts["resolved_strict"]+=1
             elif confidence_tier=="outline-agreement":counts["resolved_outline_agreement"]+=1
             elif confidence_tier=="corroborated":counts["resolved_corroborated"]+=1
+
+        # Evidence confidence is separate from winner margin because related
+        # UV families can be genuine near-ties.
+        evidence_parts=[
+            max(0.0,min(1.0,uv_outline_scores.get(winner,0.0))),
+            max(0.0,min(1.0,template_outline_scores.get(winner,0.0))),
+            max(0.0,min(1.0,uv_precision_scores.get(winner,0.0))),
+            max(0.0,min(1.0,vote_count/4.0)),
+            1.0 if primary_agree else 0.0,
+        ]
+        evidence_confidence=sum(evidence_parts)/len(evidence_parts)
+        evidence_band="strong" if evidence_confidence>=0.72 else ("moderate" if evidence_confidence>=0.60 else "limited")
 
         assignments[str(pid)]={
             "state":state,"method":method,"model":model,
