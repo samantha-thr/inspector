@@ -390,7 +390,7 @@ class ResolvedVariantRenderTask(QThread):
         try:return item,render_model_variant(model["path"],paths,512,False,self.cancel_event)
         except Exception as exc:return item,{"success":False,"message":str(exc)}
     def run(self):
-        total=len(self.assignments);started=time.monotonic();completed=ok=cached=failed=0;failures=[];outputs=[]
+        total=len(self.assignments);started=time.monotonic();completed=ok=cached=failed=0;failures=[];outputs=[];records=[]
         with ThreadPoolExecutor(max_workers=self.workers) as pool:
             futures={pool.submit(self._one,x):x for x in self.assignments}
             for future in as_completed(futures):
@@ -398,16 +398,21 @@ class ResolvedVariantRenderTask(QThread):
                 item,result=future.result()
                 if result.get("cancelled"):continue
                 completed+=1
-                if result.get("cached"):cached+=1
-                elif result.get("success"):ok+=1
+                if result.get("cached"):
+                    cached+=1;status="cached"
+                elif result.get("success"):
+                    ok+=1;status="rendered"
                 else:
-                    failed+=1;failures.append({"pid":item["pid"],"model":item["model"]["filename"],"message":result.get("message") or "Render failed","returncode":result.get("returncode"),"log":result.get("log","")})
+                    failed+=1;status="failed";failures.append({"pid":item["pid"],"model":item["model"]["filename"],"message":result.get("message") or "Render failed","returncode":result.get("returncode"),"log":result.get("log","")})
+                record={"pid":item["pid"],"state":item.get("state","resolved"),"method":item.get("method",""),"model":item["model"]["filename"],"model_path":item["model"]["path"],"textures":list(item["textures"]),"texture_count":len(item["textures"]),"status":status,"output":result.get("output") or "","cached":bool(result.get("cached")),"returncode":result.get("returncode"),"message":result.get("message") or ""}
+                records.append(record)
                 if result.get("success"):outputs.append({"pid":item["pid"],"model":item["model"],"textures":item["textures"],"output":result.get("output"),"cached":bool(result.get("cached"))})
                 elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
                 self.progress.emit(completed,total,item["pid"],rate,remaining)
             if self.cancel_event.is_set():
                 for future in futures:future.cancel()
-        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"completed":completed,"cancelled":self.cancelled,"failures":failures,"outputs":outputs,"engine":"one-shot resolved-model"})
+        records.sort(key=lambda x:int(x["pid"]) if str(x["pid"]).isdigit() else str(x["pid"]))
+        self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"completed":completed,"cancelled":self.cancelled,"failures":failures,"outputs":outputs,"records":records,"engine":"one-shot resolved-model"})
 
 
 class VehicleVariantsPage(QWidget):
