@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json,re
 from pathlib import Path
+from bg_family_resolver import cached_bg_assignment
 
 RULES_PATH=Path("vehicle_resolution_rules.json")
 
@@ -60,6 +61,14 @@ def resolve_products(folder,models,product_sets):
     for pid,paths in product_sets:
         if pid in exact:
             model=exact[pid];method="exact PID model";state="resolved"
+        elif folder=="bg":
+            body=next((p for p in paths if re.match(r"^\\d+_1\\.",Path(p).name,re.IGNORECASE)),None)
+            bg=cached_bg_assignment(pid,body)
+            if bg and bg.get("state")=="resolved" and bg.get("model"):
+                model=by_name.get(str(bg["model"]).lower());method=bg.get("method") or "verified BG template family";state="resolved" if model else "unresolved"
+                if not model:method="BG family model unavailable"
+            else:
+                model=None;method=(bg.get("method") if bg else "BG family analysis required");state="unresolved"
         elif base and base["filename"].lower() not in nonpaintable:
             model=base;method="official default model";state="resolved"
         else:
