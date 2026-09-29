@@ -363,6 +363,7 @@ def analyze_bg_families(product_sets,models,rules=None):
     }
     CACHE_PATH.parent.mkdir(parents=True,exist_ok=True)
     CACHE_PATH.write_text(json.dumps(payload,indent=2),encoding="utf-8")
+    _BG_CACHE_MEMO["token"]=None;_BG_CACHE_MEMO["data"]=None
     _write_report(payload)
     return {"ok":True,**payload}
 
@@ -383,11 +384,22 @@ def _write_report(payload):
     payload["report_json"]=str(jp)
 
 
+_BG_CACHE_MEMO={"token":None,"data":None}
+
 def load_bg_cache():
+    """Load the BG analysis cache once per file version instead of once per PID."""
     try:
+        st=CACHE_PATH.stat()
+        token=(st.st_size,st.st_mtime_ns,CACHE_VERSION)
+        if _BG_CACHE_MEMO["token"]==token:
+            return _BG_CACHE_MEMO["data"]
         data=json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-        return data if data.get("version")==CACHE_VERSION else None
-    except Exception:return None
+        if data.get("version")!=CACHE_VERSION:data=None
+        _BG_CACHE_MEMO["token"]=token;_BG_CACHE_MEMO["data"]=data
+        return data
+    except Exception:
+        _BG_CACHE_MEMO["token"]=None;_BG_CACHE_MEMO["data"]=None
+        return None
 
 
 def cached_bg_assignment(pid,body_path=None):
