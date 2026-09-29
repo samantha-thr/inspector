@@ -696,6 +696,8 @@ class VehicleVariantsPage(QWidget):
                 name=x["family_model"];resolved_by_model[name]=resolved_by_model.get(name,0)+1
         lines=[
             f"Products analyzed: {len(result.get('assignments') or {}):,}",
+            f"Reused unchanged cached results: {int(result.get('reused',0) or 0):,}",
+            f"Recomputed this run: {int(result.get('recomputed',0) or 0):,}",
             f"Resolved to paintable BG families: {counts.get('resolved',0):,}",
             f"Ambiguous / unresolved: {counts.get('ambiguous',0):,}",
             f"Special or non-paintable family matches: {counts.get('special',0):,}",
@@ -1277,7 +1279,22 @@ class DiagnosticsPage(QWidget):
 
 class SettingsPage(QWidget):
     def __init__(self,db=None):
-        super().__init__();self.db=db;self.settings=QSettings("ThereInspector","ThereInspector");b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24);h=QLabel("Settings");h.setObjectName("title");b.addWidget(h);f=QFormLayout();self.resource=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH));self.blender=QLineEdit(self.settings.value("blender_path",""));f.addRow("Resource folder",self.resource);f.addRow("Blender executable",self.blender);f.addRow("Database",QLabel(str(DATABASE_PATH)));b.addLayout(f);buttons=QHBoxLayout();save=QPushButton("Save Settings");save.clicked.connect(self.save);export=QPushButton("Export Diagnostic Snapshot");export.clicked.connect(self.export_snapshot);clean=QPushButton("Clean Temporary Render Files");clean.clicked.connect(self.clean_render_work);clear=QPushButton("Clear Model Thumbnail Cache");clear.clicked.connect(self.clear_cache);buttons.addWidget(save);buttons.addWidget(export);buttons.addWidget(clean);buttons.addWidget(clear);buttons.addStretch();b.addLayout(buttons);b.addStretch()
+        super().__init__();self.db=db;self.settings=QSettings("ThereInspector","ThereInspector")
+        b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        h=QLabel("Settings");h.setObjectName("title");b.addWidget(h)
+        f=QFormLayout();self.resource=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH));self.blender=QLineEdit(self.settings.value("blender_path",""))
+        f.addRow("Resource folder",self.resource);f.addRow("Blender executable",self.blender);f.addRow("Database",QLabel(str(DATABASE_PATH)));b.addLayout(f)
+        buttons=QHBoxLayout()
+        save=QPushButton("Save Settings");save.clicked.connect(self.save)
+        export=QPushButton("Export Diagnostic Snapshot");export.clicked.connect(self.export_snapshot)
+        clean=QPushButton("Clean Temporary Render Files");clean.clicked.connect(self.clean_render_work)
+        clear=QPushButton("Clear Model Thumbnail Cache");clear.clicked.connect(self.clear_cache)
+        optimize=QPushButton("Clean + Optimize Database");optimize.clicked.connect(self.optimize_database)
+        for button in (save,export,clean,clear,optimize):buttons.addWidget(button)
+        buttons.addStretch();b.addLayout(buttons)
+        note=QLabel("Database cleanup removes indexed files that no longer exist, trims old test/run history, checkpoints SQLite, and compacts free pages. Source models/textures and cached product renders are not deleted.")
+        note.setWordWrap(True);note.setObjectName("muted");b.addWidget(note);b.addStretch()
+
     def save(self):
         self.settings.setValue("resource_path",self.resource.text());self.settings.setValue("blender_path",self.blender.text())
         if self.blender.text().strip():os.environ["BLENDER_EXE"]=self.blender.text().strip()
@@ -1290,6 +1307,21 @@ class SettingsPage(QWidget):
 
     def clear_cache(self):
         n=purge_thumbnail_cache(); QMessageBox.information(self,APP_NAME,f"Removed {n:,} cached model thumbnails.")
+
+    def optimize_database(self):
+        if not self.db:return
+        answer=QMessageBox.question(self,"Clean + Optimize Database","Clean stale index records and compact the Inspector database?\n\nThis does not delete source models/textures or cached product renders. The window may be busy while SQLite compacts the file.",QMessageBox.Yes|QMessageBox.No,QMessageBox.Yes)
+        if answer!=QMessageBox.Yes:return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            result=self.db.maintenance_cleanup()
+        except Exception as exc:
+            QMessageBox.critical(self,APP_NAME,f"Database maintenance failed:\n{exc}");return
+        finally:
+            QApplication.restoreOverrideCursor()
+        before=result.get("before_bytes",0)/1024/1024;after=result.get("after_bytes",0)/1024/1024;reclaimed=result.get("reclaimed_bytes",0)/1024/1024
+        QMessageBox.information(self,APP_NAME,f"Database cleanup complete.\n\nRemoved stale models: {result.get('missing_models',0):,}\nRemoved stale textures: {result.get('missing_textures',0):,}\nDatabase: {before:.1f} MB → {after:.1f} MB\nReclaimed: {reclaimed:.1f} MB")
+
     def export_snapshot(self):
         if not self.db:return
         path,_=QFileDialog.getSaveFileName(self,"Export diagnostic snapshot","inspector_diagnostic.json","JSON (*.json)")
@@ -1300,3 +1332,4 @@ class SettingsPage(QWidget):
               "recent_analysis":[dict(x) for x in self.db.recent_analysis_runs(20)]}
         Path(path).write_text(json.dumps(data,indent=2,default=str),encoding="utf-8")
         QMessageBox.information(self,APP_NAME,"Diagnostic snapshot exported.")
+
