@@ -499,7 +499,7 @@ class BgTemplateReviewDialog(QDialog):
     VOTES=("2 Seater","TUV","4 Seater","Unknown")
 
     def __init__(self,sets,parent=None):
-        super().__init__(parent);self.sets=sets;self.rows=[];self.vote_by_pid={};self.diag_labels=[]
+        super().__init__(parent);self.sets=sets;self.rows=[];self.vote_by_pid={};self.diag_labels=[];self.saved_current=False
         self.setWindowTitle("BG Template Review");self.resize(1240,820)
         root=QVBoxLayout(self)
         title=QLabel("BG unresolved template review");title.setObjectName("title");root.addWidget(title)
@@ -532,7 +532,7 @@ class BgTemplateReviewDialog(QDialog):
         for label in self.diag_labels:label.setVisible(bool(shown))
 
     def load_batch(self):
-        self.vote_by_pid={};self.diag_labels=[]
+        self.vote_by_pid={};self.diag_labels=[];self.saved_current=False
         count=int(self.count.currentText())
         self.rows,self.population=select_template_review_batch(
             self.sets,count=count,mode=self.mode.currentText(),skip_reviewed=self.skip_reviewed.isChecked()
@@ -569,7 +569,7 @@ class BgTemplateReviewDialog(QDialog):
         self.area.setWidget(host);self.area.verticalScrollBar().setValue(0);self.update_status()
 
     def cast_vote(self,pid,vote):
-        self.vote_by_pid[str(pid)]=vote;self.update_status()
+        self.vote_by_pid[str(pid)]=vote;self.saved_current=False;self.update_status()
 
     def update_status(self):
         voted=len(self.vote_by_pid);shown=len(self.rows)
@@ -577,9 +577,12 @@ class BgTemplateReviewDialog(QDialog):
             f"{shown:,} templates shown from {self.population:,} eligible unresolved products • "
             f"{voted:,}/{shown:,} voted • hover a template for a larger view"
         )
-        self.save_button.setEnabled(voted>0);self.next_button.setEnabled(voted>0)
+        self.save_button.setEnabled(voted>0 and not self.saved_current);self.next_button.setEnabled(voted>0)
 
     def save_report(self,load_next=False):
+        if self.saved_current:
+            if load_next:self.load_batch()
+            return
         reviewed=[]
         for row in self.rows:
             vote=self.vote_by_pid.get(str(row["pid"]))
@@ -593,6 +596,7 @@ class BgTemplateReviewDialog(QDialog):
             QMessageBox.critical(self,APP_NAME,f"Could not save BG template review report:\n{exc}");return
         counts=paths["payload"].get("vote_counts") or {}
         summary=" • ".join(f"{name}: {counts.get(name,0)}" for name in self.VOTES)
+        self.saved_current=True;self.update_status()
         self.status.setText(f"Saved {len(reviewed):,} reviews • {summary} • {paths['csv']}")
         if load_next:self.load_batch()
 
@@ -873,6 +877,7 @@ class VehicleVariantsPage(QWidget):
             f"  Primary outline agreement: {counts.get('resolved_outline_agreement',0):,}",
             f"  Corroborated evidence: {counts.get('resolved_corroborated',0):,}",
             f"  Validated regression tier: {counts.get('resolved_regression_proposal',0):,}",
+            f"  Reviewed m002 template tier: {counts.get('resolved_reviewed_m002',0):,}",
             f"Ambiguous / unresolved: {counts.get('ambiguous',0):,}",
             f"Special or non-paintable family matches: {counts.get('special',0):,}",
             f"Low-information / solid-color textures: {counts.get('low_information',0):,}",
