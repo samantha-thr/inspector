@@ -711,6 +711,128 @@ def _write_report(payload):
     payload["report_json"]=str(jp)
 
 
+
+def bg_cache_status(product_sets, models, rules=None):
+    """Return whether the indexed BG population has work the cache has not seen.
+
+    This is intentionally cheap: it compares anchor/file tokens and body file
+    size/mtime only. No texture decoding is performed.
+    """
+    previous=load_bg_cache()
+    current_pids={str(pid) for pid,_ in product_sets}
+    previous_assignments=(previous.get("assignments") or {}) if previous else {}
+    previous_pids=set(previous_assignments)
+
+    refs=_references(product_sets,models,rules)
+    anchor_fingerprint=_anchor_fingerprint(refs) if len(refs)>=2 else None
+    analysis_fingerprint=_analysis_fingerprint(anchor_fingerprint) if anchor_fingerprint else None
+    compatible=bool(
+        previous and anchor_fingerprint and
+        previous.get("anchor_fingerprint")==anchor_fingerprint and
+        previous.get("analysis_fingerprint")==analysis_fingerprint
+    )
+
+    new=[];changed=[];current=[]
+    if compatible:
+        for pid,paths in product_sets:
+            key=str(pid);prior=previous_assignments.get(key)
+            body=next((Path(p) for p in paths if _slot(p)==1),None)
+            if prior is None:
+                new.append(key);continue
+            if body is None or not body.exists():
+                if prior.get("method")=="BG body texture unavailable":current.append(key)
+                else:changed.append(key)
+                continue
+            try:
+                st=body.stat()
+                if prior.get("body_size")==st.st_size and prior.get("body_mtime_ns")==st.st_mtime_ns:
+                    current.append(key)
+                else:changed.append(key)
+            except OSError:
+                changed.append(key)
+    else:
+        # A resolver/anchor change deliberately invalidates the whole population.
+        new=[str(pid) for pid,_ in product_sets if str(pid) not in previous_pids]
+        changed=[str(pid) for pid,_ in product_sets if str(pid) in previous_pids]
+
+    removed=sorted(previous_pids-current_pids,key=lambda x:int(x) if x.isdigit() else x)
+    stale=bool(new or changed or removed or not compatible)
+    return {
+        "stale":stale,"cache_compatible":compatible,
+        "products":len(product_sets),"new":len(new),"changed":len(changed),
+        "removed":len(removed),"current":len(current),
+        "new_pids":new,"changed_pids":changed,"removed_pids":removed,
+    }
+
+
+def analyze_indexed_bg(progress_callback=None):
+    """Continuously refresh BG resolution from the indexed database.
+
+    Unchanged body textures reuse the existing cache. New or changed products
+    are analyzed automatically; uncertain products remain unresolved for human
+    review rather than being forced into a family.
+    """
+    from database import Database
+
+    db=Database()
+    try:
+        textures=db.textures_in_folder("bg",1000000)
+        models=db.models_in_folder("bg",10000)
+        groups={}
+        for row in textures:
+            m=re.match(r"^(\d+)_([1-9]\d*)\.",str(row["filename"]),re.IGNORECASE)
+            if not m:continue
+            pid,slot=m.group(1),int(m.group(2))
+            groups.setdefault(pid,{})[slot]=row["path"]
+        product_sets=[
+            (pid,[slots[k] for k in sorted(slots)])
+            for pid,slots in sorted(groups.items(),key=lambda x:int(x[0]))
+        ]
+
+        status=bg_cache_status(product_sets,models)
+        affected=status["new"]+status["changed"]
+        if progress_callback:
+            progress_callback({
+                "index":0,"total":max(1,affected),
+                "status":f"BG resolver: {status['new']:,} new, {status['changed']:,} changed",
+            })
+
+        if not status["stale"]:
+            cached=load_bg_cache() or {}
+            result={"ok":True,**cached,"skipped":True,"reused":len(product_sets),"recomputed":0}
+        else:
+            result=analyze_bg_families(product_sets,models)
+
+        counts=result.get("counts") or {}
+        result["continuous"]={
+            **status,
+            "affected":affected,
+            "affected_resolved":0,
+            "affected_needs_review":0,
+            "total_resolved":int(counts.get("resolved",0) or 0),
+            "total_needs_review":int(counts.get("ambiguous",0) or 0),
+        }
+        affected_pids=set(status["new_pids"]+status["changed_pids"])
+        if affected_pids and result.get("assignments"):
+            for pid in affected_pids:
+                item=(result["assignments"] or {}).get(pid) or {}
+                if item.get("state")=="resolved":
+                    result["continuous"]["affected_resolved"]+=1
+                elif item.get("method")=="BG template family ambiguous":
+                    result["continuous"]["affected_needs_review"]+=1
+
+        if progress_callback:
+            progress_callback({
+                "index":max(1,affected),"total":max(1,affected),
+                "status":(
+                    f"BG resolver: {result['continuous']['affected_resolved']:,} resolved, "
+                    f"{result['continuous']['affected_needs_review']:,} need review"
+                ),
+            })
+        return result
+    finally:
+        db.close()
+
 _BG_CACHE_MEMO={"token":None,"data":None}
 
 def load_bg_cache():
