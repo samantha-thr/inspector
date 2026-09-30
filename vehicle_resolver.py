@@ -4,6 +4,25 @@ from pathlib import Path
 from bg_family_resolver import cached_bg_assignment
 
 RULES_PATH=Path("vehicle_resolution_rules.json")
+REVIEWED_BG_PATH=Path(__file__).resolve().parent/"bg_reviewed_ground_truth.json"
+_REVIEWED_BG_MEMO={"token":None,"exact":{}}
+
+
+def reviewed_bg_family(pid):
+    """Return a human-reviewed exact BG family, if one has been recorded."""
+    try:
+        st=REVIEWED_BG_PATH.stat();token=(st.st_size,st.st_mtime_ns)
+        if _REVIEWED_BG_MEMO["token"]!=token:
+            data=json.loads(REVIEWED_BG_PATH.read_text(encoding="utf-8"))
+            _REVIEWED_BG_MEMO["exact"]={
+                str(k):str(v.get("family") or "")
+                for k,v in (data.get("exact") or {}).items()
+                if isinstance(v,dict) and v.get("family")
+            }
+            _REVIEWED_BG_MEMO["token"]=token
+        return _REVIEWED_BG_MEMO["exact"].get(str(pid)) or None
+    except Exception:
+        return None
 
 
 def resource_identity(filename):
@@ -62,13 +81,18 @@ def resolve_products(folder,models,product_sets):
         if pid in exact:
             model=exact[pid];method="exact PID model";state="resolved"
         elif folder=="bg":
-            body=next((p for p in paths if re.match(r"^\\d+_1\\.",Path(p).name,re.IGNORECASE)),None)
-            bg=cached_bg_assignment(pid,body)
-            if bg and bg.get("state")=="resolved" and bg.get("model"):
-                model=by_name.get(str(bg["model"]).lower());method=bg.get("method") or "BG structural family match";state="resolved" if model else "unresolved"
-                if not model:method="BG family model unavailable"
+            reviewed=reviewed_bg_family(pid)
+            if reviewed:
+                model=by_name.get(str(reviewed).lower());method="BG human-reviewed exact family";state="resolved" if model else "unresolved"
+                if not model:method="BG reviewed family model unavailable"
             else:
-                model=None;method=(bg.get("method") if bg else "BG family analysis required");state="unresolved"
+                body=next((p for p in paths if re.match(r"^\\d+_1\\.",Path(p).name,re.IGNORECASE)),None)
+                bg=cached_bg_assignment(pid,body)
+                if bg and bg.get("state")=="resolved" and bg.get("model"):
+                    model=by_name.get(str(bg["model"]).lower());method=bg.get("method") or "BG structural family match";state="resolved" if model else "unresolved"
+                    if not model:method="BG family model unavailable"
+                else:
+                    model=None;method=(bg.get("method") if bg else "BG family analysis required");state="unresolved"
         elif base and base["filename"].lower() not in nonpaintable:
             model=base;method="official default model";state="resolved"
         else:
