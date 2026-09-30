@@ -570,7 +570,7 @@ def analyze_bg_families(product_sets,models,rules=None):
         elif not anchor["paintable"]:
             state="unresolved";method="BG special/non-paintable family";model=None;counts["special"]+=1
         else:
-            state="resolved";method="BG background-removed UV outline match";model=winner;counts["resolved"]+=1
+            state="resolved";method=("BG validated regression proposal" if confidence_tier=="regression-proposal" else "BG background-removed UV outline match");model=winner;counts["resolved"]+=1
             if confidence_tier=="strict":counts["resolved_strict"]+=1
             elif confidence_tier=="outline-agreement":counts["resolved_outline_agreement"]+=1
             elif confidence_tier=="corroborated":counts["resolved_corroborated"]+=1
