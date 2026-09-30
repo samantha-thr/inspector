@@ -31,6 +31,10 @@
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
     },
+    "185486821": {
+      "family": "m002bg.model",
+      "source": "dev23 fresh proposal boundary visual review — correct"
+    },
     "186734811": {
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
@@ -51,9 +55,17 @@
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
     },
+    "201233141": {
+      "family": "m002bg.model",
+      "source": "dev23 fresh proposal boundary visual review — correct"
+    },
     "207666811": {
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
+    },
+    "212036821": {
+      "family": "m002bg.model",
+      "source": "dev23 fresh proposal boundary visual review — correct"
     },
     "212927871": {
       "family": "m005bg.model",
@@ -98,6 +110,10 @@
     "216317831": {
       "family": "m004bg.model",
       "source": "dev16 sparse false-m005 regression case"
+    },
+    "217102871": {
+      "family": "m004bg.model",
+      "source": "dev23 fresh proposal boundary visual review — correct"
     },
     "217614831": {
       "family": "m005bg.model",
@@ -171,9 +187,21 @@
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
     },
+    "597594057": {
+      "family": "m002bg.model",
+      "source": "dev23 fresh proposal boundary visual review — correct"
+    },
     "600004590": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
+    },
+    "600513400": {
+      "family": "m002bg.model",
+      "source": "dev23 fresh proposal boundary visual review — correct"
+    },
+    "603190404": {
+      "family": "m002bg.model",
+      "source": "dev23 fresh proposal boundary visual review — correct"
     },
     "612912273": {
       "family": "m005bg.model",
@@ -199,9 +227,17 @@
       "family": "m002bg.model",
       "source": "dev22 fresh regression proposal visual review — correct"
     },
+    "720002610": {
+      "family": "m002bg.model",
+      "source": "dev23 fresh proposal boundary visual review — correct"
+    },
     "1027957177": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
+    },
+    "1049413064": {
+      "family": "m002bg.model",
+      "source": "dev23 fresh proposal boundary visual review — correct"
     },
     "1049728015": {
       "family": "m002bg.model",
@@ -214,6 +250,10 @@
     "1060524665": {
       "family": "m002bg.model",
       "source": "dev22 fresh regression proposal visual review — correct"
+    },
+    "1063819463": {
+      "family": "m002bg.model",
+      "source": "dev23 fresh proposal boundary visual review — correct"
     },
     "1063894805": {
       "family": "m002bg.model",
