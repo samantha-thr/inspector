@@ -204,6 +204,20 @@ def evaluate_bg_regression(cache=None):
         proposal_correct += int(ok)
         proposal_family_correct[expected_family] = proposal_family_correct.get(expected_family, 0) + int(ok)
 
+    proposal_abstain_correct=0
+    for pid in abstain:
+        diagnostic=assignments.get(str(pid))
+        if experimental_bg_proposal(diagnostic) is None:
+            proposal_abstain_correct+=1
+
+    proposal_exclusion_correct=0
+    for pid,expected in exclusions.items():
+        diagnostic=assignments.get(str(pid))
+        proposal=experimental_bg_proposal(diagnostic)
+        forbidden=set(expected.get("not_families") or [])
+        if proposal is None or proposal.get("family") not in forbidden:
+            proposal_exclusion_correct+=1
+
     known = reviewed_pids()
     proposal_population = []
     for pid, diagnostic in assignments.items():
@@ -237,6 +251,11 @@ def evaluate_bg_regression(cache=None):
             "reviewed_accepted": proposal_reviewed,
             "reviewed_correct": proposal_correct,
             "reviewed_accuracy": (proposal_correct / proposal_reviewed) if proposal_reviewed else 0.0,
+            "abstain_total": len(abstain),
+            "abstain_correct": proposal_abstain_correct,
+            "exclusion_total": len(exclusions),
+            "exclusion_correct": proposal_exclusion_correct,
+            "minimum_template_outline": PROPOSAL_MIN_TEMPLATE_OUTLINE,
             "reviewed_by_family": {
                 name: {
                     "accepted": proposal_family.get(name, 0),
