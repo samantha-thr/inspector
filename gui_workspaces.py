@@ -478,7 +478,7 @@ class ResolvedVariantRenderTask(QThread):
                 bind_summary=next((b for b in bindings if b.get("summary")),{})
                 record={"pid":item["pid"],"state":item.get("state","resolved"),"method":item.get("method",""),"model":item["model"]["filename"],"model_path":item["model"]["path"],"textures":list(item["textures"]),"texture_count":len(item["textures"]),"status":status,"output":result.get("output") or "","cached":bool(result.get("cached")),"returncode":result.get("returncode"),"message":result.get("message") or "","binding_profile":result.get("binding_profile") or "","material_count":bind_summary.get("material_count",""),"color_material_count":bind_summary.get("color_material_count",""),"assigned_material_count":bind_summary.get("assigned_material_count",""),"map_target_count":bind_summary.get("map_target_count",""),"assigned_map_count":bind_summary.get("assigned_map_count",""),"unassigned_maps":bind_summary.get("unassigned_maps",[]),"unassigned_color_materials":bind_summary.get("unassigned_color_materials",[]),"unused_linked_textures":bind_summary.get("unused_linked_textures",[]),"texture_bindings":bindings}
                 records.append(record)
-                if result.get("success"):outputs.append({"pid":item["pid"],"model":item["model"],"textures":item["textures"],"output":result.get("output"),"cached":bool(result.get("cached")),"binding_profile":result.get("binding_profile") or "","binding_summary":bind_summary})
+                if result.get("success"):outputs.append({"pid":item["pid"],"model":item["model"],"textures":item["textures"],"output":result.get("output"),"cached":bool(result.get("cached")),"binding_profile":result.get("binding_profile") or "","binding_summary":bind_summary,"method":item.get("method",""),"_bg_compare_rank":item.get("_bg_compare_rank")})
                 elapsed=max(time.monotonic()-started,.001);rate=completed/elapsed;remaining=(total-completed)/rate if rate else 0
                 self.progress.emit(completed,total,item["pid"],rate,remaining)
             if self.cancel_event.is_set():
@@ -524,6 +524,10 @@ class VehicleVariantsPage(QWidget):
         advanced_menu=QMenu(advanced)
         for label,button in (("Analyze UV Families",uv_analyze),("Folder Configuration",config),("Delete Resolved Renders",self.delete_all_button)):
             act=advanced_menu.addAction(label);act.triggered.connect(button.click)
+        advanced_menu.addSeparator()
+        compare_candidates=advanced_menu.addAction("Compare BG Candidate Models")
+        compare_candidates.setToolTip("Render the two strongest paintable models side-by-side for the current unresolved validation population")
+        compare_candidates.triggered.connect(self.render_bg_candidate_comparison)
         advanced.setMenu(advanced_menu)
 
         for w in (bg_analyze,resolve,QLabel("Validation"),self.sample_mode,QLabel("Count"),self.sample_size,sample,self.render_button,self.cancel_button):
@@ -915,6 +919,82 @@ class VehicleVariantsPage(QWidget):
             selected=[candidates[i] for i in idxs]
         return enrich_assignments(selected),len(candidates)
 
+    def _bg_candidate_comparison_sample(self,mode,target):
+        """Return A/B assignments for the strongest two paintable BG candidates.
+
+        This is deliberately review-only. It reuses the current unresolved sample,
+        then renders the two highest combined-score paintable families side-by-side.
+        The no-occupancy winner is recorded in the method text so we can test whether
+        occupancy is biasing difficult m004 decisions without changing production.
+        """
+        base,population=self._bg_diagnostic_sample(mode,target)
+        if not base:return [],population,0
+        cache=load_bg_cache() or {}
+        diagnostics=cache.get("assignments") or {}
+        occ_weight=float((cache.get("thresholds") or {}).get("occupancy_weight",0.05))
+        models=self.db.models_in_folder("bg",10000)
+        by_name={str(m["filename"]).lower():dict(m) for m in models}
+        paintable=("m002bg.model","m004bg.model","m005bg.model")
+        pairs=[]
+        for item in base:
+            pid=str(item["pid"]);d=diagnostics.get(pid) or {}
+            scores=d.get("scores") or {}
+            occ=d.get("occupancy_scores") or {}
+            ranked=sorted(
+                ((name,float(scores.get(name,0.0))) for name in paintable if name in by_name),
+                key=lambda x:x[1],reverse=True
+            )
+            if len(ranked)<2:continue
+            no_occ={}
+            for name,value in ranked:
+                ov=occ.get(name)
+                no_occ[name]=value-(occ_weight*float(ov)) if ov is not None else value
+            no_occ_winner=max(no_occ,key=no_occ.get) if no_occ else ""
+            for rank,(name,value) in enumerate(ranked[:2],1):
+                pairs.append({
+                    "pid":pid,"textures":item["textures"],"model":by_name[name],
+                    "state":"resolved","origin":"product",
+                    "method":(
+                        f"BG A/B candidate {rank}/2 • combined {value:.4f} • "
+                        f"no-occupancy winner {no_occ_winner or '?'} • "
+                        f"UV {d.get('uv_winner') or '?'} • template {d.get('template_winner') or '?'}"
+                    ),
+                    "_bg_compare_rank":rank
+                })
+        pairs.sort(key=lambda x:(int(x["pid"]) if x["pid"].isdigit() else x["pid"],x["_bg_compare_rank"]))
+        return enrich_assignments(pairs),population,len(base)
+
+    def render_bg_candidate_comparison(self):
+        if self.task and self.task.isRunning():
+            QMessageBox.information(self,APP_NAME,"A render task is already running.");return
+        if self.folder_name().lower()!="bg":
+            QMessageBox.information(self,APP_NAME,"BG candidate comparison is available for the bg folder.");return
+        mode=self.sample_mode.currentText() if hasattr(self,"sample_mode") else "Resolved validation"
+        if mode=="Resolved validation":
+            QMessageBox.information(self,APP_NAME,"Choose an unresolved BG validation population first, then run Compare BG Candidate Models.");return
+        target=int(self.sample_size.currentText())
+        sample,population,products=self._bg_candidate_comparison_sample(mode,target)
+        if not sample:
+            self.status.setText(f"No unresolved BG products match the {mode} comparison population.");return
+        preview=[]
+        for i in range(0,min(len(sample),12),2):
+            group=sample[i:i+2]
+            if not group:continue
+            preview.append(f"{group[0]['pid']} → "+" vs ".join(x["model"]["filename"] for x in group))
+        if products>6:preview.append(f"… plus {products-6} more product comparisons")
+        answer=QMessageBox.question(
+            self,"Compare BG Candidate Models",
+            f"{mode}\n\nCompare {products:,} product(s) from {population:,} matching unresolved candidates?\n"
+            f"This queues {len(sample):,} A/B renders; existing cached renders are reused.\n\n"
+            +"\n".join(preview)
+            +"\n\nThe production resolver is NOT changed. This is a visual comparison probe only.",
+            QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if answer!=QMessageBox.Yes:return
+        self.progress.setRange(0,len(sample));self.progress.setValue(0);self.sample_button.setEnabled(False);self.cancel_button.setEnabled(True)
+        self.status.setText(f"Rendering {products:,} BG A/B comparisons • {len(sample):,} candidate renders…")
+        self._active_sample_scope="bg-compare-"+mode.lower().replace(" ","-")
+        self.task=ResolvedVariantRenderTask(sample,int(self.workers.currentText()));self.task.progress.connect(self.on_progress);self.task.done.connect(self.resolved_sample_finished);self.task.start()
+
     def render_resolved_sample(self):
         if self.task and self.task.isRunning():
             QMessageBox.information(self,APP_NAME,"A render task is already running.");return
@@ -982,6 +1062,7 @@ class VehicleVariantsPage(QWidget):
         try:self.last_auto_report=write_render_report_files(self.last_render_report)
         except Exception:self.last_auto_report=None
         outputs=result.get("outputs",[])
+        outputs.sort(key=lambda x:(int(x["pid"]) if str(x["pid"]).isdigit() else str(x["pid"]),int(x.get("_bg_compare_rank") or 0),str(x["model"].get("filename",""))))
         d=QDialog(self);d.setWindowTitle("Resolved Sample Results");d.resize(1120,760);v=QVBoxLayout(d)
         h=QLabel(f"{len(outputs):,} successful/cached • {result.get('failed',0):,} failed");h.setObjectName("title");v.addWidget(h)
         area=QScrollArea();area.setWidgetResizable(True);host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft)
@@ -989,7 +1070,7 @@ class VehicleVariantsPage(QWidget):
             card=QFrame();card.setObjectName("card");cv=QVBoxLayout(card);im=HoverPreviewLabel();im.setAlignment(Qt.AlignCenter);p=QPixmap(str(x["output"]))
             if not p.isNull():im.set_preview_pixmap(p,240,190)
             else:im.setText("Preview unavailable")
-            cv.addWidget(im);lab=QLabel(f"PID {x['pid']}\n{x['model']['filename']}");lab.setAlignment(Qt.AlignCenter);lab.setWordWrap(True);cv.addWidget(lab)
+            cv.addWidget(im);lab=QLabel(f"PID {x['pid']}\n{x['model']['filename']}");lab.setAlignment(Qt.AlignCenter);lab.setWordWrap(True);lab.setToolTip(x.get("method",""));cv.addWidget(lab)
             bs=x.get("binding_summary") or {};bind=QLabel(f"{x.get('binding_profile') or 'binding unknown'} • maps {bs.get('assigned_map_count','?')}/{bs.get('map_target_count','?')} assigned");bind.setAlignment(Qt.AlignCenter);bind.setWordWrap(True);bind.setStyleSheet("color:#8f98a3");cv.addWidget(bind)
             if bs.get("unassigned_maps") or bs.get("unused_linked_textures"):
                 warn=QLabel(f"Binding review • unassigned maps: {len(bs.get('unassigned_maps',[]))} • unused textures: {len(bs.get('unused_linked_textures',[]))}");warn.setAlignment(Qt.AlignCenter);warn.setWordWrap(True);cv.addWidget(warn)
