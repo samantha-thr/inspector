@@ -7,6 +7,14 @@
     "m005bg.model"
   ],
   "exact": {
+    "27040701": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
+    "45470001": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "51322901": {
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
@@ -35,9 +43,17 @@
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
     },
+    "65625921": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "65786681": {
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
+    },
+    "69090341": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "71670571": {
       "family": "m002bg.model",
@@ -51,6 +67,10 @@
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "81625901": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "81650231": {
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
@@ -59,13 +79,33 @@
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "82295371": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
+    "91499231": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "94275501": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "96571611": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
+    "106472131": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "110977341": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
+    },
+    "113482181": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "114359891": {
       "family": "m002bg.model",
@@ -83,6 +123,10 @@
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
     },
+    "123391131": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "124754211": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
@@ -95,9 +139,25 @@
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
     },
+    "141982391": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "152310121": {
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
+    },
+    "160746541": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
+    "163548181": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
+    "163917031": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "172289791": {
       "family": "m002bg.model",
@@ -111,9 +171,21 @@
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
     },
+    "179014661": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
+    "179390491": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "179465481": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
+    },
+    "179728451": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "184149231": {
       "family": "m002bg.model",
@@ -143,6 +215,10 @@
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "190917801": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "191342811": {
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
@@ -159,9 +235,21 @@
       "family": "m002bg.model",
       "source": "dev23 fresh proposal boundary visual review — correct"
     },
+    "206392811": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
+    "207475801": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "207666811": {
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
+    },
+    "209641801": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "212036821": {
       "family": "m002bg.model",
@@ -190,6 +278,10 @@
     "215814841": {
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
+    },
+    "215816881": {
+      "family": "m005bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "215823831": {
       "family": "m004bg.model",
@@ -222,6 +314,10 @@
     "216317831": {
       "family": "m004bg.model",
       "source": "dev16 sparse false-m005 regression case"
+    },
+    "216396841": {
+      "family": "m005bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "217102871": {
       "family": "m004bg.model",
@@ -331,6 +427,10 @@
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "243551881": {
+      "family": "m004bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "243846841": {
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
@@ -358,6 +458,14 @@
     "250389811": {
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
+    },
+    "258266811": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
+    "258305051": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "259512031": {
       "family": "m002bg.model",
@@ -387,9 +495,21 @@
       "family": "m002bg.model",
       "source": "dev23 fresh proposal boundary visual review — correct"
     },
+    "605179025": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "605814030": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
+    },
+    "605814455": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
+    "608302048": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "612912273": {
       "family": "m005bg.model",
@@ -399,6 +519,10 @@
       "family": "m004bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "620243172": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "636147032": {
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
@@ -407,6 +531,14 @@
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "654318750": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
+    "654318769": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "668100978": {
       "family": "m004bg.model",
       "source": "dev24 fresh m004 regression proposal visual review — correct"
@@ -414,6 +546,10 @@
     "677846869": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
+    },
+    "677889008": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "685192833": {
       "family": "m002bg.model",
@@ -426,6 +562,10 @@
     "689946182": {
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
+    },
+    "692596647": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "695681373": {
       "family": "m002bg.model",
@@ -467,6 +607,10 @@
       "family": "m002bg.model",
       "source": "dev23 fresh proposal boundary visual review — correct"
     },
+    "730682443": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "1025693585": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
@@ -474,6 +618,10 @@
     "1025904472": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
+    },
+    "1025904539": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "1026536955": {
       "family": "m002bg.model",
@@ -495,6 +643,10 @@
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
     },
+    "1042318257": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "1049413064": {
       "family": "m002bg.model",
       "source": "dev23 fresh proposal boundary visual review — correct"
@@ -507,9 +659,17 @@
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "1053289320": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
+    },
     "1054699795": {
       "family": "m004bg.model",
       "source": "dev24 fresh m004 regression proposal visual review — correct"
+    },
+    "1055465794": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "1055487770": {
       "family": "m005bg.model",
@@ -546,6 +706,10 @@
     "1061436146": {
       "family": "m005bg.model",
       "source": "dev27 blind raw-template manual review"
+    },
+    "1063422530": {
+      "family": "m002bg.model",
+      "source": "dev27 additional blind raw-template review"
     },
     "1063819463": {
       "family": "m002bg.model",
@@ -687,6 +851,9 @@
     },
     "197065801": {
       "reason": "blind raw-template review: user marked Unknown; template not reliably classifiable"
+    },
+    "1065798881": {
+      "reason": "dev27 blind raw-template review: user marked Unknown; template not reliably classifiable"
     }
   },
   "exclusions": {
