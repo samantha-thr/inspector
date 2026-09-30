@@ -542,6 +542,8 @@ def analyze_bg_families(product_sets,models,rules=None):
             decision_reason="accepted: UV + template outlines agree; margin diagnostic only"
         elif corroborated_clear:
             decision_reason="accepted: 3+ independent signals corroborate"
+        elif confidence_tier=="regression-proposal":
+            decision_reason=f"accepted: validated 60/35/5 paintable proposal margin {regression_margin:.4f} >= {REGRESSION_MIN_MARGIN:.4f}"
         else:
             blockers=[]
             if sparse_evidence:
@@ -565,6 +567,7 @@ def analyze_bg_families(product_sets,models,rules=None):
             if confidence_tier=="strict":counts["resolved_strict"]+=1
             elif confidence_tier=="outline-agreement":counts["resolved_outline_agreement"]+=1
             elif confidence_tier=="corroborated":counts["resolved_corroborated"]+=1
+            elif confidence_tier=="regression-proposal":counts["resolved_regression_proposal"]+=1
 
         # Evidence confidence is separate from winner margin because related
         # UV families can be genuine near-ties.
@@ -584,6 +587,8 @@ def analyze_bg_families(product_sets,models,rules=None):
             "score":round(score80,6),"margin":round(margin,6),"votes":vote_count,
             "confidence_tier":confidence_tier,"evidence_confidence":round(evidence_confidence,6),"evidence_band":evidence_band,"sparse_evidence":sparse_evidence,"primary_agree":primary_agree,
             "uv_winner":uv_winner,"template_winner":template_winner,
+            "regression_family":regression_winner,"regression_score":round(regression_score,6),"regression_margin":round(regression_margin,6),
+            "regression_scores":{k:round(v,6) for k,v in regression_scores.items()},
             "decision_reason":decision_reason,
             "strict_score_gap":round(strict_score_gap,6),"strict_margin_gap":round(strict_margin_gap,6),
             "relaxed_score_gap":round(relaxed_score_gap,6),"relaxed_margin_gap":round(relaxed_margin_gap,6),
@@ -608,6 +613,10 @@ def analyze_bg_families(product_sets,models,rules=None):
             "quantiles":QUANTILES,"min_winner_score":MIN_WINNER_SCORE,"min_margin":MIN_MARGIN,
             "relaxed_min_score":RELAXED_MIN_SCORE,"relaxed_min_margin":RELAXED_MIN_MARGIN,
             "corroborated_min_score":CORROBORATED_MIN_SCORE,"corroborated_min_margin":CORROBORATED_MIN_MARGIN,
+            "regression_uv_outline_weight":REGRESSION_UV_OUTLINE_WEIGHT,
+            "regression_template_outline_weight":REGRESSION_TEMPLATE_OUTLINE_WEIGHT,
+            "regression_uv_precision_weight":REGRESSION_UV_PRECISION_WEIGHT,
+            "regression_min_margin":REGRESSION_MIN_MARGIN,
             "background_tolerance":BACKGROUND_TOLERANCE,
             "sparse_max_foreground_fraction":SPARSE_MAX_FOREGROUND_FRACTION,
             "sparse_min_border_background_share":SPARSE_MIN_BORDER_BACKGROUND_SHARE,
