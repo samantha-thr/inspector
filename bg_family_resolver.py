@@ -491,12 +491,36 @@ def analyze_bg_families(product_sets,models,rules=None):
         outline_clear=(primary_agree and score80>=RELAXED_MIN_SCORE and not sparse_evidence)
         corroborated_clear=(vote_count>=3 and score80>=CORROBORATED_MIN_SCORE and margin>=CORROBORATED_MIN_MARGIN and not sparse_evidence)
 
+        paintable_models=[a["model"] for a in anchors if a["paintable"]]
+        regression_scores={
+            name:(
+                REGRESSION_UV_OUTLINE_WEIGHT*uv_outline_scores.get(name,0.0)
+                + REGRESSION_TEMPLATE_OUTLINE_WEIGHT*template_outline_scores.get(name,0.0)
+                + REGRESSION_UV_PRECISION_WEIGHT*uv_precision_scores.get(name,0.0)
+            )
+            for name in paintable_models
+        }
+        regression_ranked=sorted(regression_scores.items(),key=lambda x:x[1],reverse=True)
+        regression_winner=regression_ranked[0][0] if regression_ranked else None
+        regression_score=regression_ranked[0][1] if regression_ranked else 0.0
+        regression_second=regression_ranked[1][1] if len(regression_ranked)>1 else 0.0
+        regression_margin=regression_score-regression_second
+        regression_clear=(not sparse_evidence and regression_winner is not None and regression_margin>=REGRESSION_MIN_MARGIN)
+
         if strict_clear:
             confidence_tier="strict"
         elif outline_clear:
             confidence_tier="outline-agreement"
         elif corroborated_clear:
             confidence_tier="corroborated"
+        elif regression_clear:
+            confidence_tier="regression-proposal"
+            winner=regression_winner
+            score80=combined.get(winner,0.0)
+            others=[v for name,v in combined.items() if name!=winner]
+            margin=score80-(max(others) if others else 0.0)
+            vote_count=sum(1 for scoreset in modalities if max(scoreset,key=scoreset.get)==winner)
+            primary_agree=(uv_winner==winner and template_winner==winner)
         else:
             confidence_tier=None
 
