@@ -509,7 +509,7 @@ class BgTemplateReviewDialog(QDialog):
         );help_text.setWordWrap(True);root.addWidget(help_text)
 
         controls=QHBoxLayout()
-        self.mode=QComboBox();self.mode.addItems(["Diverse unresolved","Validate m002 + template support >= .200","Validate m515 + regression m004 + margin >= .020","Validate m001 candidate","Validate m002 candidate","Validate m005 candidate","Closest to auto-resolve","Lowest evidence","Highest evidence","PID order"])
+        self.mode=QComboBox();self.mode.addItems(["Diverse unresolved","Validate reviewed m002 tier","Validate m515 + regression m004 + margin >= .020","Validate m001 candidate","Validate m002 candidate","Validate m005 candidate","Closest to auto-resolve","Lowest evidence","Highest evidence","PID order"])
         self.count=QComboBox();self.count.addItems(["10","25","50","100","250"]);self.count.setCurrentText("25")
         self.skip_reviewed=QCheckBox("Skip already reviewed");self.skip_reviewed.setChecked(True)
         self.show_diagnostics=QCheckBox("Show Inspector diagnostics");self.show_diagnostics.setChecked(False)
