@@ -561,6 +561,8 @@ def analyze_bg_families(product_sets,models,rules=None):
             decision_reason="accepted: 3+ independent signals corroborate"
         elif confidence_tier=="regression-proposal":
             decision_reason=f"accepted: validated 60/35/5 paintable proposal margin {regression_margin:.4f} >= {REGRESSION_MIN_MARGIN:.4f}"
+        elif confidence_tier=="reviewed-m002-template":
+            decision_reason=f"accepted: reviewed m002 winner + m002 template support {reviewed_m002_template_support:.4f} >= {REVIEWED_M002_MIN_TEMPLATE_OUTLINE:.4f}"
         else:
             blockers=[]
             if sparse_evidence:
@@ -580,11 +582,12 @@ def analyze_bg_families(product_sets,models,rules=None):
         elif not anchor["paintable"]:
             state="unresolved";method="BG special/non-paintable family";model=None;counts["special"]+=1
         else:
-            state="resolved";method=("BG validated regression proposal" if confidence_tier=="regression-proposal" else "BG background-removed UV outline match");model=winner;counts["resolved"]+=1
+            state="resolved";method=("BG validated regression proposal" if confidence_tier=="regression-proposal" else ("BG reviewed m002 template support" if confidence_tier=="reviewed-m002-template" else "BG background-removed UV outline match"));model=winner;counts["resolved"]+=1
             if confidence_tier=="strict":counts["resolved_strict"]+=1
             elif confidence_tier=="outline-agreement":counts["resolved_outline_agreement"]+=1
             elif confidence_tier=="corroborated":counts["resolved_corroborated"]+=1
             elif confidence_tier=="regression-proposal":counts["resolved_regression_proposal"]+=1
+            elif confidence_tier=="reviewed-m002-template":counts["resolved_reviewed_m002"]+=1
 
         # Evidence confidence is separate from winner margin because related
         # UV families can be genuine near-ties.
@@ -606,6 +609,7 @@ def analyze_bg_families(product_sets,models,rules=None):
             "uv_winner":uv_winner,"template_winner":template_winner,
             "regression_family":regression_winner,"regression_score":round(regression_score,6),"regression_margin":round(regression_margin,6),
             "regression_template_support":round(regression_template_support,6),
+            "reviewed_m002_template_support":round(reviewed_m002_template_support,6),
             "regression_scores":{k:round(v,6) for k,v in regression_scores.items()},
             "decision_reason":decision_reason,
             "strict_score_gap":round(strict_score_gap,6),"strict_margin_gap":round(strict_margin_gap,6),
@@ -636,6 +640,7 @@ def analyze_bg_families(product_sets,models,rules=None):
             "regression_uv_precision_weight":REGRESSION_UV_PRECISION_WEIGHT,
             "regression_min_margin":REGRESSION_MIN_MARGIN,
             "regression_min_template_outline":REGRESSION_MIN_TEMPLATE_OUTLINE,
+            "reviewed_m002_min_template_outline":REVIEWED_M002_MIN_TEMPLATE_OUTLINE,
             "background_tolerance":BACKGROUND_TOLERANCE,
             "sparse_max_foreground_fraction":SPARSE_MAX_FOREGROUND_FRACTION,
             "sparse_min_border_background_share":SPARSE_MIN_BORDER_BACKGROUND_SHARE,
