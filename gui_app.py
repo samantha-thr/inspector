@@ -7,6 +7,7 @@ from PySide6.QtGui import QPixmap, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import *
 from config import APP_NAME, DEFAULT_SCAN_PATH, DATABASE_PATH, VERSION
 from scanner import scan_folder, scan_textures
+from bg_family_resolver import analyze_indexed_bg
 from analysis_engine import rebuild_links, rebuild_families, rebuild_texture_families, rebuild_evidence, rebuild_texture_evidence
 from database import Database
 from gui_workspaces import AssetDialog, ComparePage, ConvertPage, KnowledgePage, SettingsPage, ThumbnailStudio, DiagnosticsPage, VehicleVariantsPage, IntelligencePage, texture_pixmap
@@ -174,13 +175,13 @@ class Worker(QThread):
 class Analysis(Page):
     def __init__(self,changed):
         super().__init__("Scan & Analysis","Run scans and rebuild Inspector intelligence without the command line")
-        self.changed=changed; self.worker=None; self.started_at=0.0; self.sequence=[]; self.sequence_index=0; self.sequence_name=""
+        self.changed=changed; self.worker=None; self.started_at=0.0; self.sequence=[]; self.sequence_index=0; self.sequence_name=""; self.last_bg_result=None
         row=QHBoxLayout(); self.settings=QSettings("ThereInspector","ThereInspector"); self.root=QLineEdit(self.settings.value("resource_path",DEFAULT_SCAN_PATH)); browse=QPushButton("Browse"); browse.clicked.connect(self.browse)
         row.addWidget(QLabel("Resources")); row.addWidget(self.root,1); row.addWidget(browse); self.box.addLayout(row)
 
         card=QFrame(); card.setObjectName("card"); cb=QVBoxLayout(card)
         t=QLabel("COMPLETE ASSET SCAN"); t.setObjectName("muted"); cb.addWidget(t)
-        d=QLabel("Scan models and textures, then rebuild links, families and evidence in one operation."); d.setWordWrap(True); d.setObjectName("muted"); cb.addWidget(d)
+        d=QLabel("Scan models and textures, automatically resolve new/changed BG products, then rebuild links, families and evidence."); d.setWordWrap(True); d.setObjectName("muted"); cb.addWidget(d)
         buttons=QHBoxLayout()
         inc=QPushButton("Run Incremental Scan"); inc.clicked.connect(lambda:self.run_complete(False))
         full=QPushButton("Run Full Scan"); full.clicked.connect(lambda:self.run_complete(True))
@@ -188,9 +189,9 @@ class Analysis(Page):
 
         advanced=QGroupBox("Individual / Advanced Jobs"); grid=QGridLayout(advanced)
         jobs=[("Scan Models",lambda:self.start(scan_folder,self.root.text())),("Scan Textures",lambda:self.start(scan_textures,self.root.text())),
-              ("Rebuild Links",lambda:self.start(rebuild_links)),("Model Families",lambda:self.start(rebuild_families)),
-              ("Texture Families",lambda:self.start(rebuild_texture_families)),("Model Evidence",lambda:self.start(rebuild_evidence)),
-              ("Texture Evidence",lambda:self.start(rebuild_texture_evidence))]
+              ("Refresh BG Resolver",lambda:self.start(analyze_indexed_bg)),("Rebuild Links",lambda:self.start(rebuild_links)),
+              ("Model Families",lambda:self.start(rebuild_families)),("Texture Families",lambda:self.start(rebuild_texture_families)),
+              ("Model Evidence",lambda:self.start(rebuild_evidence)),("Texture Evidence",lambda:self.start(rebuild_texture_evidence))]
         for i,(label,fn) in enumerate(jobs):
             b=QPushButton(label); b.clicked.connect(fn); grid.addWidget(b,i//3,i%3)
         self.box.addWidget(advanced)
@@ -215,8 +216,9 @@ class Analysis(Page):
 
     def run_complete(self,full):
         if self.worker and self.worker.isRunning(): QMessageBox.information(self,APP_NAME,"A job is already running."); return
-        root=self.root.text(); self.sequence_name="Full Scan" if full else "Incremental Scan"
+        root=self.root.text(); self.sequence_name="Full Scan" if full else "Incremental Scan"; self.last_bg_result=None
         self.sequence=[("Models",scan_folder,(root,),{"full_rescan":full}),("Textures",scan_textures,(root,),{"full_rescan":full}),
+                       ("BG Resolver",analyze_indexed_bg,(),{}),
                        ("Links",rebuild_links,(),{}),("Model Families",rebuild_families,(),{}),("Texture Families",rebuild_texture_families,(),{}),
                        ("Model Evidence",rebuild_evidence,(),{}),("Texture Evidence",rebuild_texture_evidence,(),{})]
         self.sequence_index=0; self.start_sequence()
@@ -224,7 +226,16 @@ class Analysis(Page):
     def start_sequence(self):
         if self.sequence_index>=len(self.sequence):
             self.progress.setValue(100); self.percent_label.setText("100.0%"); self.job_label.setText(self.sequence_name+" complete")
-            self.status.setText("All scan and analysis stages completed."); self.timer.stop(); self.changed(); self.sequence=[]; return
+            if self.last_bg_result and self.last_bg_result.get("ok"):
+                bg=self.last_bg_result.get("continuous") or {}
+                self.status.setText(
+                    f"Complete • BG: {int(bg.get('affected',0)):,} new/changed • "
+                    f"{int(bg.get('affected_resolved',0)):,} resolved • "
+                    f"{int(bg.get('affected_needs_review',0)):,} new reviews • "
+                    f"{int(bg.get('total_needs_review',0)):,} total need review"
+                )
+            else:self.status.setText("All scan and analysis stages completed.")
+            self.timer.stop(); self.changed(); self.sequence=[]; return
         label,fn,args,kwargs=self.sequence[self.sequence_index]; self.start(fn,*args,_sequence=True,_label=label,**kwargs)
 
     def start(self,fn,*args,_sequence=False,_label=None,**kwargs):
@@ -247,10 +258,22 @@ class Analysis(Page):
         if self.started_at:self.elapsed_label.setText("Elapsed: "+self.fmt(time.time()-self.started_at))
 
     def sequence_done(self,result):
-        self.progress.setValue(100); self.percent_label.setText("100.0%"); self.sequence_index+=1; self.start_sequence()
+        self.progress.setValue(100); self.percent_label.setText("100.0%")
+        if self.sequence_index<len(self.sequence) and self.sequence[self.sequence_index][0]=="BG Resolver":
+            self.last_bg_result=result
+        self.sequence_index+=1; self.start_sequence()
 
     def done(self,result):
-        self.progress.setValue(100); self.percent_label.setText("100.0%"); self.timer.stop(); self.status.setText("Complete")
+        self.progress.setValue(100); self.percent_label.setText("100.0%"); self.timer.stop()
+        bg=result.get("continuous") if isinstance(result,dict) else None
+        if bg:
+            self.status.setText(
+                f"BG resolver complete • {int(bg.get('affected',0)):,} new/changed • "
+                f"{int(bg.get('affected_resolved',0)):,} resolved • "
+                f"{int(bg.get('affected_needs_review',0)):,} new reviews • "
+                f"{int(bg.get('total_needs_review',0)):,} total need review"
+            )
+        else:self.status.setText("Complete")
         self.elapsed_label.setText("Elapsed: "+self.fmt(time.time()-self.started_at)); self.eta_label.setText("Remaining: 00:00"); self.changed()
 
     def fail(self,error):
