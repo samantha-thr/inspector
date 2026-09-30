@@ -14,6 +14,7 @@ from model_forensics import analyze_model_rows
 from vehicle_resolver import resolve_products, resolution_summary, enrich_assignments, folder_configuration
 from bg_family_resolver import analyze_bg_families, load_bg_cache
 from bg_regression_lab import run_bg_regression_lab as execute_bg_regression_lab, experimental_bg_proposal, reviewed_pids
+from bg_template_review import select_template_review_batch, write_template_review_report
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -492,6 +493,110 @@ class ResolvedVariantRenderTask(QThread):
         self.done.emit({"rendered":ok,"cached":cached,"failed":failed,"total":total,"completed":completed,"cancelled":self.cancelled,"failures":failures,"outputs":outputs,"records":records,"binding_complete":binding_complete,"binding_review":binding_review,"unsupported":unsupported,"engine":"one-shot resolved-model"})
 
 
+class BgTemplateReviewDialog(QDialog):
+    """Fast, render-free human review of unresolved BG body templates."""
+
+    VOTES=("2 Seater","TUV","4 Seater","Unknown")
+
+    def __init__(self,sets,parent=None):
+        super().__init__(parent);self.sets=sets;self.rows=[];self.vote_by_pid={};self.diag_labels=[]
+        self.setWindowTitle("BG Template Review");self.resize(1240,820)
+        root=QVBoxLayout(self)
+        title=QLabel("BG unresolved template review");title.setObjectName("title");root.addWidget(title)
+        help_text=QLabel(
+            "Review the raw _1 body template directly — no Blender render. "
+            "Votes are intentionally blind by default so Inspector's current guess does not bias the ground truth."
+        );help_text.setWordWrap(True);root.addWidget(help_text)
+
+        controls=QHBoxLayout()
+        self.mode=QComboBox();self.mode.addItems(["Diverse unresolved","Closest to auto-resolve","Lowest evidence","Highest evidence","PID order"])
+        self.count=QComboBox();self.count.addItems(["10","25","50","100","250"]);self.count.setCurrentText("25")
+        self.skip_reviewed=QCheckBox("Skip already reviewed");self.skip_reviewed.setChecked(True)
+        self.show_diagnostics=QCheckBox("Show Inspector diagnostics");self.show_diagnostics.setChecked(False)
+        self.show_diagnostics.toggled.connect(self.toggle_diagnostics)
+        load=QPushButton("Load Batch");load.clicked.connect(self.load_batch)
+        for w in (QLabel("Selection"),self.mode,QLabel("Count"),self.count,self.skip_reviewed,self.show_diagnostics,load):controls.addWidget(w)
+        controls.addStretch();root.addLayout(controls)
+
+        self.status=QLabel("Ready");root.addWidget(self.status)
+        self.area=QScrollArea();self.area.setWidgetResizable(True);root.addWidget(self.area,1)
+
+        buttons=QHBoxLayout()
+        self.save_button=QPushButton("Save Report");self.save_button.clicked.connect(self.save_report)
+        self.next_button=QPushButton("Save + Next Batch");self.next_button.clicked.connect(lambda:self.save_report(load_next=True))
+        close=QPushButton("Close");close.clicked.connect(self.accept)
+        buttons.addStretch();buttons.addWidget(self.save_button);buttons.addWidget(self.next_button);buttons.addWidget(close);root.addLayout(buttons)
+        self.load_batch()
+
+    def toggle_diagnostics(self,shown):
+        for label in self.diag_labels:label.setVisible(bool(shown))
+
+    def load_batch(self):
+        self.vote_by_pid={};self.diag_labels=[]
+        count=int(self.count.currentText())
+        self.rows,self.population=select_template_review_batch(
+            self.sets,count=count,mode=self.mode.currentText(),skip_reviewed=self.skip_reviewed.isChecked()
+        )
+        host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft)
+        for index,row in enumerate(self.rows):
+            card=QFrame();card.setObjectName("card");card.setMinimumWidth(270);card.setMaximumWidth(330)
+            box=QVBoxLayout(card)
+            image=HoverPreviewLabel();image.setAlignment(Qt.AlignCenter);image.setMinimumSize(245,205)
+            pix=texture_pixmap(row["body_texture"],520,420)
+            if pix.isNull():image.setText("No template preview")
+            else:image.set_preview_pixmap(pix,245,205)
+            box.addWidget(image)
+            pid=QLabel(f"PID {row['pid']}");pid.setAlignment(Qt.AlignCenter);box.addWidget(pid)
+            diag=QLabel(
+                f"candidate {row['family_model'] or '?'} • UV {row['uv_winner'] or '?'} • template {row['template_winner'] or '?'}\n"
+                f"evidence {row['evidence_confidence']:.3f} • regression {row['regression_family'] or '?'} / {row['regression_margin']:.4f}"
+            )
+            diag.setAlignment(Qt.AlignCenter);diag.setWordWrap(True);diag.setStyleSheet("color:#8f98a3")
+            diag.setVisible(self.show_diagnostics.isChecked());self.diag_labels.append(diag);box.addWidget(diag)
+
+            vote_box=QGridLayout();group=QButtonGroup(card);group.setExclusive(True)
+            for button_index,label in enumerate(self.VOTES):
+                button=QPushButton(label);button.setCheckable(True)
+                button.setToolTip({
+                    "2 Seater":"m002bg.model","TUV":"m004bg.model",
+                    "4 Seater":"m005bg.model","Unknown":"Template is not discriminating enough to classify"
+                }[label])
+                button.clicked.connect(lambda checked,p=str(row["pid"]),v=label:self.cast_vote(p,v) if checked else None)
+                group.addButton(button);vote_box.addWidget(button,button_index//2,button_index%2)
+            box.addLayout(vote_box)
+            grid.addWidget(card,index//4,index%4)
+        if not self.rows:grid.addWidget(QLabel("No unreviewed ambiguous BG templates match this selection."),0,0)
+        self.area.setWidget(host);self.area.verticalScrollBar().setValue(0);self.update_status()
+
+    def cast_vote(self,pid,vote):
+        self.vote_by_pid[str(pid)]=vote;self.update_status()
+
+    def update_status(self):
+        voted=len(self.vote_by_pid);shown=len(self.rows)
+        self.status.setText(
+            f"{shown:,} templates shown from {self.population:,} eligible unresolved products • "
+            f"{voted:,}/{shown:,} voted • hover a template for a larger view"
+        )
+        self.save_button.setEnabled(voted>0);self.next_button.setEnabled(voted>0)
+
+    def save_report(self,load_next=False):
+        reviewed=[]
+        for row in self.rows:
+            vote=self.vote_by_pid.get(str(row["pid"]))
+            if not vote:continue
+            item=dict(row);item["vote"]=vote;reviewed.append(item)
+        if not reviewed:
+            QMessageBox.information(self,APP_NAME,"Vote on at least one template before saving.");return
+        try:
+            paths=write_template_review_report(reviewed,self.mode.currentText())
+        except Exception as exc:
+            QMessageBox.critical(self,APP_NAME,f"Could not save BG template review report:\n{exc}");return
+        counts=paths["payload"].get("vote_counts") or {}
+        summary=" • ".join(f"{name}: {counts.get(name,0)}" for name in self.VOTES)
+        self.status.setText(f"Saved {len(reviewed):,} reviews • {summary} • {paths['csv']}")
+        if load_next:self.load_batch()
+
+
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
         super().__init__();self.db=db;self.task=None;self.bg_task=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;self.variant_page=0;self.variant_page_size=100;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
@@ -520,6 +625,7 @@ class VehicleVariantsPage(QWidget):
         self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Regression proposal (fresh)","Regression proposal m004 (fresh)","Regression proposal m005 (fresh)","Regression proposal boundary (fresh)","m002 ↔ m005 disagreements","m002 candidate disagreements","m004 candidate disagreements","m005 candidate disagreements","Sparse evidence holds","All ambiguous"]);self.sample_mode.setToolTip("Validation modes probe unresolved BG populations without changing classifier state. Use these to approve the next automatic-resolution rules from small rendered samples.")
         self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Number of products in the validation sample")
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
+        template_review=QPushButton("Review Templates");template_review.setToolTip("Classify unresolved BG products directly from their raw _1 templates without rendering");template_review.clicked.connect(self.open_bg_template_review);self.template_review_button=template_review
 
         advanced=QToolButton();advanced.setText("Advanced");advanced.setPopupMode(QToolButton.InstantPopup)
         advanced_menu=QMenu(advanced)
@@ -539,7 +645,7 @@ class VehicleVariantsPage(QWidget):
         action_row.addStretch();b.addLayout(action_row)
 
         utility_row=QHBoxLayout()
-        for w in (QLabel("Workers"),self.workers,self.failures_button,self.export_render_button,advanced):
+        for w in (template_review,QLabel("Workers"),self.workers,self.failures_button,self.export_render_button,advanced):
             utility_row.addWidget(w)
         utility_row.addStretch();b.addLayout(utility_row)
         self.compatibility=QLabel("Resolver status: verified PID/model matches and explicit official default-model rules.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
@@ -548,6 +654,14 @@ class VehicleVariantsPage(QWidget):
         self.variant_prev.clicked.connect(lambda:self.change_variant_page(-1));self.variant_next.clicked.connect(lambda:self.change_variant_page(1))
         pager.addWidget(self.variant_prev);pager.addWidget(self.variant_page_label);pager.addWidget(self.variant_next);pager.addStretch();b.addLayout(pager)
         self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.template_box.currentIndexChanged.connect(self.refresh);self.load_folder()
+    def open_bg_template_review(self):
+        if self.folder_name().lower()!="bg":
+            QMessageBox.information(self,APP_NAME,"Template Review is available for the bg folder.");return
+        cache=load_bg_cache() or {}
+        if not (cache.get("assignments") or {}):
+            QMessageBox.information(self,APP_NAME,"Run Analyze BG Families first so Template Review can target the unresolved population.");return
+        BgTemplateReviewDialog(self.sets,self).exec()
+
     def reset_variant_page(self,*_):
         self.variant_page=0;self.refresh()
 
@@ -583,7 +697,7 @@ class VehicleVariantsPage(QWidget):
             if previous:
                 idx=self.model_box.findText(previous)
                 if idx>=0:self.model_box.setCurrentIndex(idx)
-            self.model_box.blockSignals(False);self.discover();self.bg_analyze_button.setEnabled(folder.lower()=="bg");self.refresh()
+            self.model_box.blockSignals(False);self.discover();self.bg_analyze_button.setEnabled(folder.lower()=="bg");self.template_review_button.setEnabled(folder.lower()=="bg");self.refresh()
             if self.raw_texture_count:
                 self.status.setText(f"Loaded {len(models):,} models • scanned {self.raw_texture_count:,} textures • discovered {len(self.sets):,} PID sets from {folder}")
             else:
