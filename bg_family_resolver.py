@@ -652,7 +652,7 @@ def _write_report(payload):
         w.writerow([
             "pid","state","method","confidence_tier","evidence_confidence","evidence_band","sparse_evidence","decision_reason",
             "primary_agree","uv_winner","template_winner","family_model","template",
-            "score","margin","votes",
+            "score","margin","votes","regression_family","regression_score","regression_margin",
             "strict_score_gap","strict_margin_gap",
             "relaxed_score_gap","relaxed_margin_gap",
             "corroborated_score_gap","corroborated_margin_gap",
@@ -670,6 +670,7 @@ def _write_report(payload):
                 pid,x.get("state"),x.get("method"),x.get("confidence_tier",""),x.get("evidence_confidence",""),x.get("evidence_band",""),x.get("sparse_evidence",""),x.get("decision_reason",""),
                 x.get("primary_agree",""),x.get("uv_winner",""),x.get("template_winner",""),
                 x.get("family_model"),x.get("template"),x.get("score"),x.get("margin"),x.get("votes"),
+                x.get("regression_family",""),x.get("regression_score",""),x.get("regression_margin",""),
                 x.get("strict_score_gap",""),x.get("strict_margin_gap",""),
                 x.get("relaxed_score_gap",""),x.get("relaxed_margin_gap",""),
                 x.get("corroborated_score_gap",""),x.get("corroborated_margin_gap",""),
