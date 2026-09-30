@@ -108,6 +108,22 @@ def unresolved_template_population(sets, skip_reviewed=True):
     return rows
 
 
+def reviewed_m002_population(sets, skip_reviewed=True):
+    cache=load_bg_cache() or {}
+    assignments=cache.get("assignments") or {}
+    bodies=_body_paths(sets)
+    known=_known_reviewed_pids() if skip_reviewed else set()
+    rows=[]
+    for pid,d in assignments.items():
+        if d.get("state")=="resolved" and d.get("confidence_tier")=="reviewed-m002-template":
+            if skip_reviewed and str(pid) in known:
+                continue
+            body=bodies.get(str(pid))
+            if body:
+                rows.append(_review_row(pid,body,d))
+    return rows
+
+
 def _diverse(rows):
     buckets = defaultdict(list)
     for row in rows:
