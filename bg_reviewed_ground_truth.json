@@ -1,0 +1,289 @@
+{
+  "schema_version": 1,
+  "description": "Human-reviewed BG family ground truth used only for regression analysis. Production resolver must not read this as classification output.",
+  "paintable_families": [
+    "m002bg.model",
+    "m004bg.model",
+    "m005bg.model"
+  ],
+  "exact": {
+    "53350601": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "65786681": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "125481561": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "140261691": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "177441021": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "186734811": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "186742831": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "186748811": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "191342811": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "196350961": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "207666811": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "212927871": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "215802871": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "215807801": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "215814841": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "215823831": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "215828941": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "215829911": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "215836801": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "216090831": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "216317831": {
+      "family": "m004bg.model",
+      "source": "dev16 sparse false-m005 regression case"
+    },
+    "218348811": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "219661891": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "220766021": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "220865931": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "221719811": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "224154801": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "229985811": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "232324841": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "234983811": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "244616941": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "249117841": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "250389811": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "600004590": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "612912273": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "695683741": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "700667669": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "705343060": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "708553547": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1027957177": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "1055487770": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1063894805": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "1064309742": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "1065569775": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "1065707097": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "1065725352": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1065925172": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1065925310": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1065978997": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "1065992447": {
+      "family": "m002bg.model",
+      "source": "manual/template verified difficult-case review"
+    },
+    "1066376438": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "1066746814": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1066746832": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1066747223": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1066747305": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1066747387": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1066747483": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1066747581": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1066747613": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1066748220": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1066748278": {
+      "family": "m005bg.model",
+      "source": "dev16 full m005 candidate review"
+    },
+    "1067006485": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "1067006507": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "1067006522": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "1067006595": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    },
+    "1067008351": {
+      "family": "m004bg.model",
+      "source": "dev20 m004 A/B visual review"
+    }
+  },
+  "abstain": {
+    "179784041": {
+      "known_actual_family": "m002bg.model",
+      "reason": "generic/non-discriminating texture; could be used on m002, m004, or m005"
+    }
+  },
+  "exclusions": {
+    "244375931": {
+      "not_families": [
+        "m005bg.model"
+      ],
+      "reason": "visually confirmed not a 4-seater; exact family not established"
+    }
+  }
+}
