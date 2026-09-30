@@ -13,6 +13,7 @@ from uv_intelligence import analyze_model_uv, compare_uv_fingerprints
 from model_forensics import analyze_model_rows
 from vehicle_resolver import resolve_products, resolution_summary, enrich_assignments, folder_configuration
 from bg_family_resolver import analyze_bg_families, load_bg_cache
+from bg_regression_lab import run_bg_regression_lab as execute_bg_regression_lab, experimental_bg_proposal, reviewed_pids
 
 def texture_pixmap(path, max_w=560, max_h=440):
     try:
@@ -516,7 +517,7 @@ class VehicleVariantsPage(QWidget):
         bg_analyze=QPushButton("Analyze BG Families");bg_analyze.clicked.connect(self.analyze_bg_families);self.bg_analyze_button=bg_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
-        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","m002 ↔ m005 disagreements","m002 candidate disagreements","m004 candidate disagreements","m005 candidate disagreements","Sparse evidence holds","All ambiguous"]);self.sample_mode.setToolTip("Validation modes probe unresolved BG populations without changing classifier state. Use these to approve the next automatic-resolution rules from small rendered samples.")
+        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Regression proposal (fresh)","m002 ↔ m005 disagreements","m002 candidate disagreements","m004 candidate disagreements","m005 candidate disagreements","Sparse evidence holds","All ambiguous"]);self.sample_mode.setToolTip("Validation modes probe unresolved BG populations without changing classifier state. Use these to approve the next automatic-resolution rules from small rendered samples.")
         self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Number of products in the validation sample")
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
 
@@ -525,6 +526,9 @@ class VehicleVariantsPage(QWidget):
         for label,button in (("Analyze UV Families",uv_analyze),("Folder Configuration",config),("Delete Resolved Renders",self.delete_all_button)):
             act=advanced_menu.addAction(label);act.triggered.connect(button.click)
         advanced_menu.addSeparator()
+        regression_lab=advanced_menu.addAction("Run BG Regression Lab")
+        regression_lab.setToolTip("Evaluate experimental scoring against the human-reviewed BG regression set without changing production")
+        regression_lab.triggered.connect(self.run_bg_regression_lab)
         compare_candidates=advanced_menu.addAction("Compare BG Candidate Models")
         compare_candidates.setToolTip("Render the two strongest paintable models side-by-side for the current unresolved validation population")
         compare_candidates.triggered.connect(self.render_bg_candidate_comparison)
