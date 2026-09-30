@@ -517,7 +517,7 @@ class VehicleVariantsPage(QWidget):
         bg_analyze=QPushButton("Analyze BG Families");bg_analyze.clicked.connect(self.analyze_bg_families);self.bg_analyze_button=bg_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
-        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Regression proposal (fresh)","Regression proposal m005 (fresh)","Regression proposal boundary (fresh)","m002 ↔ m005 disagreements","m002 candidate disagreements","m004 candidate disagreements","m005 candidate disagreements","Sparse evidence holds","All ambiguous"]);self.sample_mode.setToolTip("Validation modes probe unresolved BG populations without changing classifier state. Use these to approve the next automatic-resolution rules from small rendered samples.")
+        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Regression proposal (fresh)","Regression proposal m004 (fresh)","Regression proposal m005 (fresh)","Regression proposal boundary (fresh)","m002 ↔ m005 disagreements","m002 candidate disagreements","m004 candidate disagreements","m005 candidate disagreements","Sparse evidence holds","All ambiguous"]);self.sample_mode.setToolTip("Validation modes probe unresolved BG populations without changing classifier state. Use these to approve the next automatic-resolution rules from small rendered samples.")
         self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Number of products in the validation sample")
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
 
@@ -906,7 +906,7 @@ class VehicleVariantsPage(QWidget):
         models=self.db.models_in_folder("bg",10000)
         by_name={str(m["filename"]).lower():dict(m) for m in models}
         paths_by_pid={str(pid):paths for pid,paths in self.sets}
-        proposal_modes={"Regression proposal (fresh)","Regression proposal m005 (fresh)","Regression proposal boundary (fresh)"}
+        proposal_modes={"Regression proposal (fresh)","Regression proposal m004 (fresh)","Regression proposal m005 (fresh)","Regression proposal boundary (fresh)"}
         known_reviewed=reviewed_pids() if mode in proposal_modes else set()
         candidates=[]
         for pid,d in diagnostics.items():
@@ -931,6 +931,8 @@ class VehicleVariantsPage(QWidget):
 
             if mode=="Regression proposal (fresh)" or mode=="Regression proposal boundary (fresh)":
                 keep=True
+            elif mode=="Regression proposal m004 (fresh)":
+                keep=(family_l=="m004bg.model")
             elif mode=="Regression proposal m005 (fresh)":
                 keep=(family_l=="m005bg.model")
             elif mode=="m002 ↔ m005 disagreements":
