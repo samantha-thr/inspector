@@ -798,6 +798,12 @@ class VehicleVariantsPage(QWidget):
 
     def refresh(self):
         assignments=self._basic_resolved_assignments();summary=resolution_summary(assignments)
+        needs_review=sum(1 for x in assignments if x["state"]=="unresolved" and x.get("method")=="BG template family ambiguous")
+        if self.folder_name().lower()=="bg":
+            self.template_review_button.setText(f"Needs Review ({needs_review:,})")
+            self.template_review_button.setToolTip("Blind-review only the BG templates the automatic resolver could not classify safely")
+        else:
+            self.template_review_button.setText("Review Templates")
         mode=self.view_filter.currentText() if hasattr(self,"view_filter") else "Rendered"
         cached_count=0;missing_count=0;filtered=[]
         for x in assignments:
@@ -832,7 +838,9 @@ class VehicleVariantsPage(QWidget):
         self.area.setWidget(host);self.area.verticalScrollBar().setValue(0)
         self.variant_prev.setEnabled(self.variant_page>0);self.variant_next.setEnabled(hi<len(filtered))
         self.variant_page_label.setText(f"Page {self.variant_page+1:,} of {pages:,} • showing {lo+1 if filtered else 0:,}–{hi:,} of {len(filtered):,}")
-        self.compatibility.setText(f"Resolver • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • verified model assignments only")
+        if self.folder_name().lower()=="bg":
+            self.compatibility.setText(f"Continuous BG resolver • {summary['resolved']:,} resolved • {needs_review:,} need review • {summary['unresolved']-needs_review:,} held/special")
+        else:self.compatibility.setText(f"Resolver • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • verified model assignments only")
         self.status.setText(f"{len(self.sets):,} PID sets • {cached_count:,} rendered • {missing_count:,} resolved/missing • {summary['unresolved']:,} unresolved • showing {len(page):,}")
 
     def _resolved_assignments(self):
