@@ -78,6 +78,13 @@ def _review_row(pid, body, diagnostic):
         "regression_score": float(diagnostic.get("regression_score") or 0.0),
         "regression_margin": float(diagnostic.get("regression_margin") or 0.0),
         "regression_template_support": float(diagnostic.get("regression_template_support") or 0.0),
+        "decision_reason": str(diagnostic.get("decision_reason") or ""),
+        "scores_json": json.dumps(diagnostic.get("scores") or {}, sort_keys=True),
+        "uv_outline_scores_json": json.dumps(diagnostic.get("uv_outline_scores") or {}, sort_keys=True),
+        "template_outline_scores_json": json.dumps(diagnostic.get("template_outline_scores") or {}, sort_keys=True),
+        "uv_precision_scores_json": json.dumps(diagnostic.get("uv_precision_scores") or {}, sort_keys=True),
+        "occupancy_scores_json": json.dumps(diagnostic.get("occupancy_scores") or {}, sort_keys=True),
+        "occupancy_json": json.dumps(diagnostic.get("occupancy") or {}, sort_keys=True),
     }
 
 
@@ -140,6 +147,19 @@ def _diverse(rows):
 
 def select_template_review_batch(sets, count=25, mode="Diverse unresolved", skip_reviewed=True):
     rows = unresolved_template_population(sets, skip_reviewed=skip_reviewed)
+
+    # dev26 blind review produced several clean hypotheses. These targeted modes
+    # are validation populations only: they do not change production assignments.
+    if mode == "Validate m005 template winner":
+        rows = [r for r in rows if r["template_winner"] == "m005bg.model"]
+    elif mode == "Validate m515 + m002 template":
+        rows = [r for r in rows if r["family_model"] == "m515bf.model" and r["template_winner"] == "m002bg.model"]
+    elif mode == "Validate m001 candidate":
+        rows = [r for r in rows if r["family_model"] == "m001bg.model"]
+    elif mode == "Validate m005 candidate":
+        rows = [r for r in rows if r["family_model"] == "m005bg.model"]
+
+    population = len(rows)
     if mode == "Closest to auto-resolve":
         rows.sort(key=lambda r: (-r["regression_margin"], -r["regression_template_support"], -r["evidence_confidence"], int(r["pid"])))
     elif mode == "Lowest evidence":
@@ -148,9 +168,11 @@ def select_template_review_batch(sets, count=25, mode="Diverse unresolved", skip
         rows.sort(key=lambda r: (-r["evidence_confidence"], -r["score"], int(r["pid"])))
     elif mode == "PID order":
         rows.sort(key=lambda r: int(r["pid"]))
+    elif mode.startswith("Validate "):
+        rows.sort(key=lambda r: (-r["evidence_confidence"], -r["score"], int(r["pid"])))
     else:
         rows = _diverse(rows)
-    return rows[: max(1, int(count))], len(rows)
+    return rows[: max(1, int(count))], population
 
 
 REPORT_COLUMNS = [
@@ -159,7 +181,9 @@ REPORT_COLUMNS = [
     "evidence_confidence", "evidence_band", "score", "margin", "votes",
     "primary_agree", "sparse_evidence",
     "regression_family", "regression_score", "regression_margin",
-    "regression_template_support",
+    "regression_template_support", "decision_reason",
+    "scores_json", "uv_outline_scores_json", "template_outline_scores_json",
+    "uv_precision_scores_json", "occupancy_scores_json", "occupancy_json",
 ]
 
 
