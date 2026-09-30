@@ -881,9 +881,11 @@ class VehicleVariantsPage(QWidget):
             self.status.setText("Automatic BG resolver did not produce a usable result." if automatic else "BG family analysis did not produce a usable result.");return
         counts=result.get("counts") or {};self.refresh()
         if automatic:
+            effective=self._basic_resolved_assignments();effective_summary=resolution_summary(effective)
+            needs_review=sum(1 for x in effective if x["state"]=="unresolved" and x.get("method")=="BG template family ambiguous")
             self.status.setText(
                 f"BG resolver complete • {int(result.get('recomputed',0) or 0):,} new/changed processed • "
-                f"{counts.get('resolved',0):,} total resolved • {counts.get('ambiguous',0):,} need review"
+                f"{effective_summary['resolved']:,} total resolved • {needs_review:,} need review"
             )
             return
         d=QDialog(self);d.setWindowTitle("BG Family Analysis");d.resize(760,500);v=QVBoxLayout(d)
