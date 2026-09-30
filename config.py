@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "There Inspector"
-VERSION = "3.0.0-dev23"
+VERSION = "3.0.0-dev24"
 
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_SCAN_PATH = r"C:\Makena\There\ThereClient\Resources"
