@@ -99,6 +99,14 @@
       "family": "m004bg.model",
       "source": "dev16 sparse false-m005 regression case"
     },
+    "217614831": {
+      "family": "m005bg.model",
+      "source": "dev23 fresh m005 regression proposal visual review — correct"
+    },
+    "217619821": {
+      "family": "m005bg.model",
+      "source": "dev23 fresh m005 regression proposal visual review — correct"
+    },
     "217783021": {
       "family": "m004bg.model",
       "source": "dev22 fresh regression proposal visual review — correct"
