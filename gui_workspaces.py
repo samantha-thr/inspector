@@ -3,7 +3,7 @@ import csv, json, os, re, subprocess, time, threading
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from pathlib import Path
 from PySide6.QtCore import Qt, QSettings, QThread, Signal
-from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtGui import QPixmap, QImage, QCursor
 from PySide6.QtWidgets import *
 from config import APP_NAME, DATABASE_PATH, DEFAULT_SCAN_PATH
 from there_texture_decoder import open_texture_image
@@ -77,6 +77,39 @@ def write_render_report_files(report):
 def reveal(p):
     try: subprocess.Popen(["explorer","/select,",str(Path(p))]) if os.name=="nt" else None
     except Exception: pass
+
+class HoverPreviewLabel(QLabel):
+    """Thumbnail label that shows the full render at a useful review size on hover."""
+    def __init__(self,parent=None):
+        super().__init__(parent);self._hover_source=QPixmap();self._hover_popup=None
+        self.setMouseTracking(True)
+
+    def set_preview_pixmap(self,pixmap,thumb_w,thumb_h):
+        self._hover_source=QPixmap(pixmap)
+        self.setPixmap(pixmap.scaled(thumb_w,thumb_h,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        self.setToolTip("Hover for larger preview")
+
+    def enterEvent(self,event):
+        if not self._hover_source.isNull():
+            popup=QLabel()
+            popup.setWindowFlags(Qt.ToolTip|Qt.FramelessWindowHint)
+            popup.setAttribute(Qt.WA_TransparentForMouseEvents,True)
+            popup.setStyleSheet("QLabel { background: #111; border: 1px solid #59616b; padding: 8px; }")
+            popup.setPixmap(self._hover_source.scaled(720,560,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+            popup.adjustSize()
+            pos=QCursor.pos();x=pos.x()+18;y=pos.y()+18
+            screen=QApplication.screenAt(pos)
+            if screen:
+                g=screen.availableGeometry()
+                x=max(g.left(),min(x,g.right()-popup.width()))
+                y=max(g.top(),min(y,g.bottom()-popup.height()))
+            popup.move(x,y);popup.show();self._hover_popup=popup
+        super().enterEvent(event)
+
+    def leaveEvent(self,event):
+        if self._hover_popup is not None:
+            self._hover_popup.close();self._hover_popup=None
+        super().leaveEvent(event)
 
 class Task(QThread):
     done=Signal(object); failed=Signal(str)
@@ -647,9 +680,9 @@ class VehicleVariantsPage(QWidget):
         page=filtered[lo:hi]
         host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft);shown=0
         for x,cached in page:
-            card=QFrame();card.setObjectName("card");card.setMinimumWidth(225);v=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);im.setMinimumSize(210,170)
+            card=QFrame();card.setObjectName("card");card.setMinimumWidth(225);v=QVBoxLayout(card);im=HoverPreviewLabel();im.setAlignment(Qt.AlignCenter);im.setMinimumSize(210,170)
             if cached:
-                pix=QPixmap(str(cached));im.setPixmap(pix.scaled(210,170,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+                pix=QPixmap(str(cached));im.set_preview_pixmap(pix,210,170)
             else:
                 im.setText("Unresolved" if x["state"]=="unresolved" else "Missing render")
             v.addWidget(im)
@@ -953,8 +986,8 @@ class VehicleVariantsPage(QWidget):
         h=QLabel(f"{len(outputs):,} successful/cached • {result.get('failed',0):,} failed");h.setObjectName("title");v.addWidget(h)
         area=QScrollArea();area.setWidgetResizable(True);host=QWidget();grid=QGridLayout(host);grid.setAlignment(Qt.AlignTop|Qt.AlignLeft)
         for i,x in enumerate(outputs):
-            card=QFrame();card.setObjectName("card");cv=QVBoxLayout(card);im=QLabel();im.setAlignment(Qt.AlignCenter);p=QPixmap(str(x["output"]))
-            if not p.isNull():im.setPixmap(p.scaled(240,190,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+            card=QFrame();card.setObjectName("card");cv=QVBoxLayout(card);im=HoverPreviewLabel();im.setAlignment(Qt.AlignCenter);p=QPixmap(str(x["output"]))
+            if not p.isNull():im.set_preview_pixmap(p,240,190)
             else:im.setText("Preview unavailable")
             cv.addWidget(im);lab=QLabel(f"PID {x['pid']}\n{x['model']['filename']}");lab.setAlignment(Qt.AlignCenter);lab.setWordWrap(True);cv.addWidget(lab)
             bs=x.get("binding_summary") or {};bind=QLabel(f"{x.get('binding_profile') or 'binding unknown'} • maps {bs.get('assigned_map_count','?')}/{bs.get('map_target_count','?')} assigned");bind.setAlignment(Qt.AlignCenter);bind.setWordWrap(True);bind.setStyleSheet("color:#8f98a3");cv.addWidget(bind)
