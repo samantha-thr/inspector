@@ -14,7 +14,7 @@ from there_texture_decoder import open_texture_image
 from there_model_decoder import decode_model
 
 
-CACHE_VERSION = 11
+CACHE_VERSION = 12
 CACHE_PATH = Path("cache/bg_family_resolution.json")
 REPORT_ROOT = Path("reports/bg_family_analysis")
 QUANTILES = (0.70, 0.80, 0.85)
@@ -41,7 +41,8 @@ REGRESSION_TEMPLATE_OUTLINE_WEIGHT = 0.35
 REGRESSION_UV_PRECISION_WEIGHT = 0.05
 REGRESSION_MIN_MARGIN = 0.020
 REGRESSION_MIN_TEMPLATE_OUTLINE = 0.20
-ANALYSIS_ALGORITHM = "background-removed-uv-outline-v5-regression-proposal"
+REVIEWED_M002_MIN_TEMPLATE_OUTLINE = 0.20
+ANALYSIS_ALGORITHM = "background-removed-uv-outline-v6-reviewed-m002"
 
 
 def _slot(path):
@@ -302,6 +303,7 @@ def _analysis_fingerprint(anchor_fingerprint):
         "regression_uv_precision_weight":REGRESSION_UV_PRECISION_WEIGHT,
         "regression_min_margin":REGRESSION_MIN_MARGIN,
         "regression_min_template_outline":REGRESSION_MIN_TEMPLATE_OUTLINE,
+        "reviewed_m002_min_template_outline":REVIEWED_M002_MIN_TEMPLATE_OUTLINE,
         "min_border_background_share":MIN_BORDER_BACKGROUND_SHARE,
         "min_foreground_fraction":MIN_FOREGROUND_FRACTION,
         "max_foreground_fraction":MAX_FOREGROUND_FRACTION,
@@ -375,7 +377,7 @@ def analyze_bg_families(product_sets,models,rules=None):
     reuse_previous=bool(previous and previous.get("analysis_fingerprint")==analysis_fingerprint)
     previous_assignments=(previous.get("assignments") or {}) if reuse_previous else {}
     assignments={}
-    counts={"resolved":0,"resolved_strict":0,"resolved_outline_agreement":0,"resolved_corroborated":0,"resolved_regression_proposal":0,"ambiguous":0,"special":0,"missing_body":0,"low_information":0}
+    counts={"resolved":0,"resolved_strict":0,"resolved_outline_agreement":0,"resolved_corroborated":0,"resolved_regression_proposal":0,"resolved_reviewed_m002":0,"ambiguous":0,"special":0,"missing_body":0,"low_information":0}
     reused=recomputed=0
 
     def count_assignment(item):
@@ -387,6 +389,7 @@ def analyze_bg_families(product_sets,models,rules=None):
             elif tier=="outline-agreement":counts["resolved_outline_agreement"]+=1
             elif tier=="corroborated":counts["resolved_corroborated"]+=1
             elif tier=="regression-proposal":counts["resolved_regression_proposal"]+=1
+            elif tier=="reviewed-m002-template":counts["resolved_reviewed_m002"]+=1
         elif method=="BG special/non-paintable family":counts["special"]+=1
         elif method=="BG low-information/solid-color texture":counts["low_information"]+=1
         elif method=="BG body texture unavailable":counts["missing_body"]+=1
