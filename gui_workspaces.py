@@ -877,6 +877,8 @@ class VehicleVariantsPage(QWidget):
             f"Candidate-margin proposal (>= {float(proposal.get('minimum_margin',0)):.3f}): "
             f"{proposal.get('reviewed_correct',0)}/{proposal.get('reviewed_accepted',0)} reviewed accepted "
             f"({pct(proposal.get('reviewed_accuracy'))})\n"
+            f"Abstention checks: {proposal.get('abstain_correct',0)}/{proposal.get('abstain_total',0)} correct • "
+            f"exclusion checks: {proposal.get('exclusion_correct',0)}/{proposal.get('exclusion_total',0)} correct\n"
             f"Reviewed accepted by family: "
             f"m002 {proposal.get('reviewed_by_family',{}).get('m002bg.model',{}).get('accepted',0)}, "
             f"m004 {proposal.get('reviewed_by_family',{}).get('m004bg.model',{}).get('accepted',0)}, "
