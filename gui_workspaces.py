@@ -517,7 +517,7 @@ class VehicleVariantsPage(QWidget):
         bg_analyze=QPushButton("Analyze BG Families");bg_analyze.clicked.connect(self.analyze_bg_families);self.bg_analyze_button=bg_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
-        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Regression proposal (fresh)","m002 ↔ m005 disagreements","m002 candidate disagreements","m004 candidate disagreements","m005 candidate disagreements","Sparse evidence holds","All ambiguous"]);self.sample_mode.setToolTip("Validation modes probe unresolved BG populations without changing classifier state. Use these to approve the next automatic-resolution rules from small rendered samples.")
+        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Regression proposal (fresh)","Regression proposal m005 (fresh)","Regression proposal boundary (fresh)","m002 ↔ m005 disagreements","m002 candidate disagreements","m004 candidate disagreements","m005 candidate disagreements","Sparse evidence holds","All ambiguous"]);self.sample_mode.setToolTip("Validation modes probe unresolved BG populations without changing classifier state. Use these to approve the next automatic-resolution rules from small rendered samples.")
         self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Number of products in the validation sample")
         sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
 
@@ -906,7 +906,8 @@ class VehicleVariantsPage(QWidget):
         models=self.db.models_in_folder("bg",10000)
         by_name={str(m["filename"]).lower():dict(m) for m in models}
         paths_by_pid={str(pid):paths for pid,paths in self.sets}
-        known_reviewed=reviewed_pids() if mode=="Regression proposal (fresh)" else set()
+        proposal_modes={"Regression proposal (fresh)","Regression proposal m005 (fresh)","Regression proposal boundary (fresh)"}
+        known_reviewed=reviewed_pids() if mode in proposal_modes else set()
         candidates=[]
         for pid,d in diagnostics.items():
             if d.get("state")!="unresolved" or d.get("method")!="BG template family ambiguous":
@@ -914,7 +915,7 @@ class VehicleVariantsPage(QWidget):
             family=str(d.get("family_model") or "")
             family_l=family.lower()
             proposal=None
-            if mode=="Regression proposal (fresh)":
+            if mode in proposal_modes:
                 if str(pid) in known_reviewed:continue
                 proposal=experimental_bg_proposal(d)
                 if not proposal:continue
@@ -928,8 +929,10 @@ class VehicleVariantsPage(QWidget):
             votes=int(d.get("votes") or 0)
             evidence=float(d.get("evidence_confidence") or 0.0)
 
-            if mode=="Regression proposal (fresh)":
+            if mode=="Regression proposal (fresh)" or mode=="Regression proposal boundary (fresh)":
                 keep=True
+            elif mode=="Regression proposal m005 (fresh)":
+                keep=(family_l=="m005bg.model")
             elif mode=="m002 ↔ m005 disagreements":
                 keep=(not primary and {uv,template}=={"m002bg.model","m005bg.model"})
             elif mode=="m002 candidate disagreements":
@@ -959,12 +962,18 @@ class VehicleVariantsPage(QWidget):
                     + f"• evidence {evidence:.3f} • score {score:.4f} • margin {margin:.4f} • votes {votes}"
                 ),
                 "_bg_score":score,"_bg_margin":margin,"_bg_votes":votes,
-                "_bg_evidence":evidence,"_bg_family":family
+                "_bg_evidence":evidence,"_bg_family":family,
+                "_bg_proposal_margin":float(proposal["margin"]) if proposal else None
             })
 
         # Rank by independent evidence rather than winner margin. Spread the chosen
         # sample through the full ranked population so the review covers both the
         # strongest and weakest examples instead of cherry-picking easy cases.
+        if mode=="Regression proposal boundary (fresh)":
+            candidates.sort(key=lambda x:(x["_bg_proposal_margin"],x["_bg_evidence"],int(x["pid"]) if x["pid"].isdigit() else x["pid"]))
+            selected=candidates[:target]
+            return enrich_assignments(selected),len(candidates)
+
         candidates.sort(key=lambda x:(-x["_bg_evidence"],-x["_bg_votes"],-x["_bg_score"],int(x["pid"]) if x["pid"].isdigit() else x["pid"]))
         if len(candidates)<=target:return enrich_assignments(candidates),len(candidates)
         if target==1:selected=[candidates[len(candidates)//2]]
