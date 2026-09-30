@@ -12,7 +12,7 @@ from model_thumbnail import cached_thumbnail, render_model_thumbnail, purge_thum
 from uv_intelligence import analyze_model_uv, compare_uv_fingerprints
 from model_forensics import analyze_model_rows
 from vehicle_resolver import resolve_products, resolution_summary, enrich_assignments, folder_configuration
-from bg_family_resolver import analyze_bg_families, load_bg_cache
+from bg_family_resolver import analyze_bg_families, load_bg_cache, bg_cache_status
 from bg_regression_lab import run_bg_regression_lab as execute_bg_regression_lab, experimental_bg_proposal, reviewed_pids
 from bg_template_review import select_template_review_batch, write_template_review_report
 
@@ -603,7 +603,7 @@ class BgTemplateReviewDialog(QDialog):
 
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
-        super().__init__();self.db=db;self.task=None;self.bg_task=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;self.variant_page=0;self.variant_page_size=100;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        super().__init__();self.db=db;self.task=None;self.bg_task=None;self.bg_analysis_automatic=False;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;self.variant_page=0;self.variant_page_size=100;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Product Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Resolve product models from client evidence and render verified product/model combinations without manual model guessing."))
         # Keep legacy model/template selectors internally for BG research, but the
         # normal workflow is now folder -> resolver -> render.
@@ -693,7 +693,7 @@ class VehicleVariantsPage(QWidget):
         m=re.match(r"^(\d+)_([1-9]\d*)\.",str(name),re.IGNORECASE)
         return (m.group(1),int(m.group(2))) if m else None
     def load_folder(self):
-        folder=self.folder_name();previous=self.model_box.currentText()
+        folder=self.folder_name();previous=self.model_box.currentText();auto_bg=False;bg_status=None
         self.status.setText(f"Loading {folder}…");self.load_button.setEnabled(False);QApplication.processEvents()
         try:
             models=self.db.models_in_folder(folder,10000);self.model_box.blockSignals(True);self.model_box.clear()
@@ -702,6 +702,9 @@ class VehicleVariantsPage(QWidget):
                 idx=self.model_box.findText(previous)
                 if idx>=0:self.model_box.setCurrentIndex(idx)
             self.model_box.blockSignals(False);self.discover();self.bg_analyze_button.setEnabled(folder.lower()=="bg");self.template_review_button.setEnabled(folder.lower()=="bg");self.refresh()
+            if folder.lower()=="bg":
+                bg_status=bg_cache_status(self.sets,models)
+                auto_bg=bool(bg_status.get("stale"))
             if self.raw_texture_count:
                 self.status.setText(f"Loaded {len(models):,} models • scanned {self.raw_texture_count:,} textures • discovered {len(self.sets):,} PID sets from {folder}")
             else:
@@ -709,6 +712,12 @@ class VehicleVariantsPage(QWidget):
                 samples=" | ".join(f"{x['folder']!r}: {x['count']:,} e.g. {x['sample']}" for x in dbg)
                 self.status.setText(f"Loaded {len(models):,} models • scanned 0 textures for {folder} • DB matches: {samples or 'none'}")
         finally:self.load_button.setEnabled(True)
+        if auto_bg:
+            self.status.setText(
+                f"BG resolver found {int(bg_status.get('new',0)):,} new and "
+                f"{int(bg_status.get('changed',0)):,} changed products • resolving automatically…"
+            )
+            self.analyze_bg_families(True)
     @staticmethod
     def is_template_texture(filename):
         import re
@@ -829,12 +838,13 @@ class VehicleVariantsPage(QWidget):
     def _resolved_assignments(self):
         return enrich_assignments(self._basic_resolved_assignments())
 
-    def analyze_bg_families(self):
+    def analyze_bg_families(self,automatic=False):
         if self.folder_name().lower()!="bg":
             QMessageBox.information(self,APP_NAME,"BG family analysis is only applicable to the bg resource folder.");return
         if self.bg_task and self.bg_task.isRunning():
             QMessageBox.information(self,APP_NAME,"BG family analysis is already running.");return
         models=self.db.models_in_folder("bg",10000)
+        self.bg_analysis_automatic=bool(automatic)
         self.bg_analyze_button.setEnabled(False)
         for control in (self.sample_button,self.render_button,self.delete_all_button,self.resolve_button):
             control.setEnabled(False)
@@ -846,20 +856,28 @@ class VehicleVariantsPage(QWidget):
         self.bg_task.start()
 
     def bg_family_analysis_failed(self,message):
+        automatic=self.bg_analysis_automatic;self.bg_analysis_automatic=False
         self.progress.setRange(0,100);self.progress.setValue(0);self.bg_analyze_button.setEnabled(True);self.bg_task=None
         for control in (self.sample_button,self.render_button,self.delete_all_button,self.resolve_button):
             control.setEnabled(True)
-        QMessageBox.critical(self,APP_NAME,f"BG family analysis failed:\n{message}")
-        self.status.setText("BG family analysis failed.")
+        if not automatic:QMessageBox.critical(self,APP_NAME,f"BG family analysis failed:\n{message}")
+        self.status.setText(f"Automatic BG resolver failed: {message}" if automatic else "BG family analysis failed.")
 
     def bg_family_analysis_finished(self,result):
+        automatic=self.bg_analysis_automatic;self.bg_analysis_automatic=False
         self.progress.setRange(0,100);self.progress.setValue(100);self.bg_analyze_button.setEnabled(True);self.bg_task=None
         for control in (self.sample_button,self.render_button,self.delete_all_button,self.resolve_button):
             control.setEnabled(True)
         if not result.get("ok"):
-            QMessageBox.warning(self,APP_NAME,result.get("message") or "BG family analysis did not produce a usable result.")
-            self.status.setText("BG family analysis did not produce a usable result.");return
+            if not automatic:QMessageBox.warning(self,APP_NAME,result.get("message") or "BG family analysis did not produce a usable result.")
+            self.status.setText("Automatic BG resolver did not produce a usable result." if automatic else "BG family analysis did not produce a usable result.");return
         counts=result.get("counts") or {};self.refresh()
+        if automatic:
+            self.status.setText(
+                f"BG resolver complete • {int(result.get('recomputed',0) or 0):,} new/changed processed • "
+                f"{counts.get('resolved',0):,} total resolved • {counts.get('ambiguous',0):,} need review"
+            )
+            return
         d=QDialog(self);d.setWindowTitle("BG Family Analysis");d.resize(760,500);v=QVBoxLayout(d)
         title=QLabel("BG family analysis complete");title.setObjectName("title");v.addWidget(title)
         text=QPlainTextEdit();text.setReadOnly(True)
