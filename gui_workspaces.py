@@ -775,7 +775,7 @@ class VehicleVariantsPage(QWidget):
         if result.get("report_csv"):
             lines += ["",f"CSV report: {result['report_csv']}",f"JSON report: {result.get('report_json','')}"]
         text.setPlainText("\n".join(lines));v.addWidget(text,1)
-        note=QLabel("Resolution removes each texture's background and compares the remaining outline with decoded model UV-island boundaries and verified stock-template outlines. Primary UV + template agreement can now resolve close family ties without a minimum margin; sparse textures are held for review. Margin remains diagnostic. The CSV includes evidence confidence, sparse-evidence status, acceptance reasons, votes, and every per-model component score.")
+        note=QLabel("Resolution removes each texture's background and compares the remaining outline with decoded model UV-island boundaries and verified stock-template outlines. Primary UV + template agreement resolves close family ties without a minimum margin. The validated regression tier uses paintable-only 60/35/5 outline scoring with no occupancy contribution, a 0.020 proposal margin, and a minimum template-outline support gate so generic/non-discriminating textures remain unresolved. Sparse textures are also held for review.")
         note.setWordWrap(True);v.addWidget(note)
         close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
         self.status.setText(f"BG analysis complete • {counts.get('resolved',0):,} resolved • {counts.get('ambiguous',0):,} ambiguous • {counts.get('low_information',0):,} low-information • {counts.get('special',0):,} special/non-paintable")
