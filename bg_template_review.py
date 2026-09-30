@@ -150,12 +150,14 @@ def select_template_review_batch(sets, count=25, mode="Diverse unresolved", skip
 
     # dev26 blind review produced several clean hypotheses. These targeted modes
     # are validation populations only: they do not change production assignments.
-    if mode == "Validate m005 template winner":
-        rows = [r for r in rows if r["template_winner"] == "m005bg.model"]
-    elif mode == "Validate m515 + m002 template":
-        rows = [r for r in rows if r["family_model"] == "m515bf.model" and r["template_winner"] == "m002bg.model"]
+    if mode == "Validate m515 margin >= .020":
+        rows = [r for r in rows if r["family_model"] == "m515bf.model" and r["margin"] >= 0.020]
     elif mode == "Validate m001 candidate":
         rows = [r for r in rows if r["family_model"] == "m001bg.model"]
+    elif mode == "Validate m002 candidate":
+        rows = [r for r in rows if r["family_model"] == "m002bg.model"]
+    elif mode == "Validate m005 high score >= .580":
+        rows = [r for r in rows if r["family_model"] == "m005bg.model" and r["score"] >= 0.580]
     elif mode == "Validate m005 candidate":
         rows = [r for r in rows if r["family_model"] == "m005bg.model"]
 
