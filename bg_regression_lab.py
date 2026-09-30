@@ -12,6 +12,7 @@ GROUND_TRUTH_PATH = Path(__file__).resolve().with_name("bg_reviewed_ground_truth
 REPORT_ROOT = Path("reports/bg_regression_lab")
 PAINTABLE = ("m002bg.model", "m004bg.model", "m005bg.model")
 PROPOSAL_MARGIN = 0.020
+PROPOSAL_MIN_TEMPLATE_OUTLINE = 0.20
 PROPOSAL_WEIGHTS = {
     "uv_outline": 0.60,
     "template_outline": 0.35,
@@ -87,25 +88,22 @@ STRATEGIES = (
 
 
 def experimental_bg_proposal(diagnostic):
-    """Return the dev22 review-only proposal for one cached BG diagnostic.
-
-    This intentionally does not mutate resolver state. A proposal is emitted only
-    when the paintable-only 60/35/5 outline score has at least a 0.020 margin and
-    the existing sparse-evidence guard is not active.
-    """
-    if not diagnostic or diagnostic.get("state") != "unresolved":
+    """Return the validated paintable-only BG proposal for one diagnostic."""
+    if not diagnostic:
         return None
-    if diagnostic.get("method") != "BG template family ambiguous":
-        return None
-    if diagnostic.get("sparse_evidence"):
+    is_ambiguous=(diagnostic.get("state")=="unresolved" and diagnostic.get("method")=="BG template family ambiguous")
+    is_promoted=(diagnostic.get("state")=="resolved" and diagnostic.get("confidence_tier")=="regression-proposal")
+    if not (is_ambiguous or is_promoted) or diagnostic.get("sparse_evidence"):
         return None
     scores = strategy_scores(diagnostic, "outline_60_35_precision_05")
     winner, margin, ranked = _rank(scores)
-    if not winner or margin < PROPOSAL_MARGIN:
+    template_support=float((diagnostic.get("template_outline_scores") or {}).get(winner,0.0) or 0.0) if winner else 0.0
+    if not winner or margin < PROPOSAL_MARGIN or template_support < PROPOSAL_MIN_TEMPLATE_OUTLINE:
         return None
     return {
         "family": winner,
         "margin": margin,
+        "template_support": template_support,
         "scores": scores,
         "ranked": ranked,
         "strategy": "outline_60_35_precision_05",
