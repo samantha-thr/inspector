@@ -856,6 +856,40 @@ class VehicleVariantsPage(QWidget):
         populate();close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
         self.status.setText(f"Resolution preview • {summary['resolved']:,} resolved • {summary['unresolved']:,} unresolved • no guesses")
 
+    def run_bg_regression_lab(self):
+        try:
+            report,paths=execute_bg_regression_lab()
+        except Exception as exc:
+            QMessageBox.critical(self,APP_NAME,f"BG Regression Lab failed:\n{exc}");return
+        strategies=report.get("strategies") or {}
+        current=strategies.get("current_combined") or {}
+        no_occ=strategies.get("no_occupancy") or {}
+        outline=strategies.get("outline_60_35_precision_05") or {}
+        proposal=report.get("proposal") or {}
+        def pct(value):return f"{100.0*float(value or 0.0):.1f}%"
+        message=(
+            "BG Regression Lab — review-only\n\n"
+            f"Reviewed exact cases: {report.get('reviewed_exact_count',0)}\n"
+            f"Current combined: {current.get('exact_correct',0)}/{current.get('exact_total',0)} ({pct(current.get('exact_accuracy'))})\n"
+            f"No occupancy: {no_occ.get('exact_correct',0)}/{no_occ.get('exact_total',0)} ({pct(no_occ.get('exact_accuracy'))})\n"
+            f"60/35/5 outline proposal: {outline.get('exact_correct',0)}/{outline.get('exact_total',0)} ({pct(outline.get('exact_accuracy'))})\n\n"
+            f"Safe-margin proposal (>= {float(proposal.get('minimum_margin',0)):.3f}): "
+            f"{proposal.get('reviewed_correct',0)}/{proposal.get('reviewed_accepted',0)} reviewed accepted "
+            f"({pct(proposal.get('reviewed_accuracy'))})\n"
+            f"Fresh unresolved candidates: {proposal.get('fresh_candidates',0)} "
+            f"(m002 {proposal.get('fresh_by_family',{}).get('m002bg.model',0)}, "
+            f"m004 {proposal.get('fresh_by_family',{}).get('m004bg.model',0)}, "
+            f"m005 {proposal.get('fresh_by_family',{}).get('m005bg.model',0)})\n\n"
+            "This does NOT change production assignments.\n"
+            "Use Validation → Regression proposal (fresh) for an independent spot-check.\n\n"
+            f"Reports:\n{paths[0]}\n{paths[1]}"
+        )
+        QMessageBox.information(self,"BG Regression Lab",message)
+        self.status.setText(
+            f"BG regression lab: proposal {proposal.get('reviewed_correct',0)}/{proposal.get('reviewed_accepted',0)} "
+            f"reviewed • {proposal.get('fresh_candidates',0)} fresh candidates"
+        )
+
     def _bg_diagnostic_sample(self,mode,target):
         """Build validation-only samples from unresolved BG analysis candidates.
 
