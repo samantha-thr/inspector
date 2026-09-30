@@ -11,6 +11,10 @@
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
     },
+    "58459301": {
+      "family": "m002bg.model",
+      "source": "dev22 fresh regression proposal visual review — correct"
+    },
     "65786681": {
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
@@ -55,6 +59,10 @@
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
     },
+    "215442831": {
+      "family": "m002bg.model",
+      "source": "dev22 fresh regression proposal visual review — correct"
+    },
     "215802871": {
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
@@ -91,13 +99,25 @@
       "family": "m004bg.model",
       "source": "dev16 sparse false-m005 regression case"
     },
+    "217783021": {
+      "family": "m004bg.model",
+      "source": "dev22 fresh regression proposal visual review — correct"
+    },
     "218348811": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
     },
+    "219205811": {
+      "family": "m004bg.model",
+      "source": "dev22 fresh regression proposal visual review — correct"
+    },
     "219661891": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
+    },
+    "220425901": {
+      "family": "m002bg.model",
+      "source": "dev22 fresh regression proposal visual review — correct"
     },
     "220766021": {
       "family": "m004bg.model",
@@ -131,6 +151,10 @@
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
     },
+    "247856031": {
+      "family": "m004bg.model",
+      "source": "dev22 fresh regression proposal visual review — correct"
+    },
     "249117841": {
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
@@ -163,13 +187,25 @@
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
     },
+    "712902376": {
+      "family": "m002bg.model",
+      "source": "dev22 fresh regression proposal visual review — correct"
+    },
     "1027957177": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
     },
+    "1049728015": {
+      "family": "m002bg.model",
+      "source": "dev22 fresh regression proposal visual review — correct"
+    },
     "1055487770": {
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
+    },
+    "1060524665": {
+      "family": "m002bg.model",
+      "source": "dev22 fresh regression proposal visual review — correct"
     },
     "1063894805": {
       "family": "m002bg.model",
@@ -202,6 +238,10 @@
     "1065978997": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
+    },
+    "1065991986": {
+      "family": "m002bg.model",
+      "source": "dev22 fresh regression proposal visual review — correct"
     },
     "1065992447": {
       "family": "m002bg.model",
