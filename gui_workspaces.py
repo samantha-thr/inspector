@@ -758,6 +758,7 @@ class VehicleVariantsPage(QWidget):
             f"  Strict confidence: {counts.get('resolved_strict',0):,}",
             f"  Primary outline agreement: {counts.get('resolved_outline_agreement',0):,}",
             f"  Corroborated evidence: {counts.get('resolved_corroborated',0):,}",
+            f"  Validated regression tier: {counts.get('resolved_regression_proposal',0):,}",
             f"Ambiguous / unresolved: {counts.get('ambiguous',0):,}",
             f"Special or non-paintable family matches: {counts.get('special',0):,}",
             f"Low-information / solid-color textures: {counts.get('low_information',0):,}",
@@ -880,7 +881,7 @@ class VehicleVariantsPage(QWidget):
             f"m002 {proposal.get('reviewed_by_family',{}).get('m002bg.model',{}).get('accepted',0)}, "
             f"m004 {proposal.get('reviewed_by_family',{}).get('m004bg.model',{}).get('accepted',0)}, "
             f"m005 {proposal.get('reviewed_by_family',{}).get('m005bg.model',{}).get('accepted',0)}\n"
-            f"Fresh unresolved candidates: {proposal.get('fresh_candidates',0)} "
+            f"Unreviewed proposal candidates: {proposal.get('fresh_candidates',0)} "
             f"(m002 {proposal.get('fresh_by_family',{}).get('m002bg.model',0)}, "
             f"m004 {proposal.get('fresh_by_family',{}).get('m004bg.model',0)}, "
             f"m005 {proposal.get('fresh_by_family',{}).get('m005bg.model',0)})\n\n"
