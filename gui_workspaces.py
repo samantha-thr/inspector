@@ -888,9 +888,12 @@ class VehicleVariantsPage(QWidget):
             elif mode=="m005 candidate disagreements":
                 keep=(family_l=="m005bg.model" and not primary)
             elif mode=="Sparse evidence holds":
-                keep=sparse
+                keep=(sparse and family_l in {"m002bg.model","m004bg.model","m005bg.model"})
             else: # All ambiguous
-                keep=True
+                # Production validation is for paintable BG families only. m001 and
+                # m515bf are known nonpaintable/default families and can win noisy
+                # diagnostic scores without being valid product-family assignments.
+                keep=(family_l in {"m002bg.model","m004bg.model","m005bg.model"})
             if not keep:continue
             model=by_name.get(family_l);paths=paths_by_pid.get(str(pid))
             if not model or not paths:continue
