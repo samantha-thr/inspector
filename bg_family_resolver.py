@@ -516,6 +516,11 @@ def analyze_bg_families(product_sets,models,rules=None):
             regression_margin>=REGRESSION_MIN_MARGIN and
             regression_template_support>=REGRESSION_MIN_TEMPLATE_OUTLINE
         )
+        reviewed_m002_template_support=template_outline_scores.get("m002bg.model",0.0)
+        reviewed_m002_clear=(
+            not sparse_evidence and winner=="m002bg.model" and
+            reviewed_m002_template_support>=REVIEWED_M002_MIN_TEMPLATE_OUTLINE
+        )
 
         if strict_clear:
             confidence_tier="strict"
@@ -531,6 +536,8 @@ def analyze_bg_families(product_sets,models,rules=None):
             margin=score80-(max(others) if others else 0.0)
             vote_count=sum(1 for scoreset in modalities if max(scoreset,key=scoreset.get)==winner)
             primary_agree=(uv_winner==winner and template_winner==winner)
+        elif reviewed_m002_clear:
+            confidence_tier="reviewed-m002-template"
         else:
             confidence_tier=None
 
