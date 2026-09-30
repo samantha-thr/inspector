@@ -162,7 +162,7 @@ def _diverse(rows):
 
 
 def select_template_review_batch(sets, count=25, mode="Diverse unresolved", skip_reviewed=True):
-    rows = unresolved_template_population(sets, skip_reviewed=skip_reviewed)
+    rows = reviewed_m002_population(sets, skip_reviewed=skip_reviewed) if mode == "Validate reviewed m002 tier" else unresolved_template_population(sets, skip_reviewed=skip_reviewed)
 
     # dev26 blind review produced several clean hypotheses. These targeted modes
     # are validation populations only: they do not change production assignments.
