@@ -902,6 +902,7 @@ class VehicleVariantsPage(QWidget):
         models=self.db.models_in_folder("bg",10000)
         by_name={str(m["filename"]).lower():dict(m) for m in models}
         paths_by_pid={str(pid):paths for pid,paths in self.sets}
+        known_reviewed=reviewed_pids() if mode=="Regression proposal (fresh)" else set()
         candidates=[]
         for pid,d in diagnostics.items():
             if d.get("state")!="unresolved" or d.get("method")!="BG template family ambiguous":
@@ -910,7 +911,7 @@ class VehicleVariantsPage(QWidget):
             family_l=family.lower()
             proposal=None
             if mode=="Regression proposal (fresh)":
-                if str(pid) in reviewed_pids():continue
+                if str(pid) in known_reviewed:continue
                 proposal=experimental_bg_proposal(d)
                 if not proposal:continue
                 family=str(proposal["family"]);family_l=family.lower()
