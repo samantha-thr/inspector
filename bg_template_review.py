@@ -153,7 +153,7 @@ def select_template_review_batch(sets, count=25, mode="Diverse unresolved", skip
     if mode == "Validate m002 + template support >= .200":
         rows = [
             r for r in rows
-            if r["family_model"] == "m002bg.model" and r["regression_template_support"] >= 0.200
+            if r["family_model"] == "m002bg.model" and float(json.loads(r["template_outline_scores_json"]).get("m002bg.model", 0.0) or 0.0) >= 0.200
         ]
     elif mode == "Validate m515 + regression m004 + margin >= .020":
         rows = [
