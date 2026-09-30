@@ -40,6 +40,7 @@ REGRESSION_UV_OUTLINE_WEIGHT = 0.60
 REGRESSION_TEMPLATE_OUTLINE_WEIGHT = 0.35
 REGRESSION_UV_PRECISION_WEIGHT = 0.05
 REGRESSION_MIN_MARGIN = 0.020
+REGRESSION_MIN_TEMPLATE_OUTLINE = 0.20
 ANALYSIS_ALGORITHM = "background-removed-uv-outline-v5-regression-proposal"
 
 
@@ -300,6 +301,7 @@ def _analysis_fingerprint(anchor_fingerprint):
         "regression_template_outline_weight":REGRESSION_TEMPLATE_OUTLINE_WEIGHT,
         "regression_uv_precision_weight":REGRESSION_UV_PRECISION_WEIGHT,
         "regression_min_margin":REGRESSION_MIN_MARGIN,
+        "regression_min_template_outline":REGRESSION_MIN_TEMPLATE_OUTLINE,
         "min_border_background_share":MIN_BORDER_BACKGROUND_SHARE,
         "min_foreground_fraction":MIN_FOREGROUND_FRACTION,
         "max_foreground_fraction":MAX_FOREGROUND_FRACTION,
@@ -505,7 +507,12 @@ def analyze_bg_families(product_sets,models,rules=None):
         regression_score=regression_ranked[0][1] if regression_ranked else 0.0
         regression_second=regression_ranked[1][1] if len(regression_ranked)>1 else 0.0
         regression_margin=regression_score-regression_second
-        regression_clear=(not sparse_evidence and regression_winner is not None and regression_margin>=REGRESSION_MIN_MARGIN)
+        regression_template_support=template_outline_scores.get(regression_winner,0.0) if regression_winner else 0.0
+        regression_clear=(
+            not sparse_evidence and regression_winner is not None and
+            regression_margin>=REGRESSION_MIN_MARGIN and
+            regression_template_support>=REGRESSION_MIN_TEMPLATE_OUTLINE
+        )
 
         if strict_clear:
             confidence_tier="strict"
@@ -588,6 +595,7 @@ def analyze_bg_families(product_sets,models,rules=None):
             "confidence_tier":confidence_tier,"evidence_confidence":round(evidence_confidence,6),"evidence_band":evidence_band,"sparse_evidence":sparse_evidence,"primary_agree":primary_agree,
             "uv_winner":uv_winner,"template_winner":template_winner,
             "regression_family":regression_winner,"regression_score":round(regression_score,6),"regression_margin":round(regression_margin,6),
+            "regression_template_support":round(regression_template_support,6),
             "regression_scores":{k:round(v,6) for k,v in regression_scores.items()},
             "decision_reason":decision_reason,
             "strict_score_gap":round(strict_score_gap,6),"strict_margin_gap":round(strict_margin_gap,6),
@@ -617,6 +625,7 @@ def analyze_bg_families(product_sets,models,rules=None):
             "regression_template_outline_weight":REGRESSION_TEMPLATE_OUTLINE_WEIGHT,
             "regression_uv_precision_weight":REGRESSION_UV_PRECISION_WEIGHT,
             "regression_min_margin":REGRESSION_MIN_MARGIN,
+            "regression_min_template_outline":REGRESSION_MIN_TEMPLATE_OUTLINE,
             "background_tolerance":BACKGROUND_TOLERANCE,
             "sparse_max_foreground_fraction":SPARSE_MAX_FOREGROUND_FRACTION,
             "sparse_min_border_background_share":SPARSE_MIN_BORDER_BACKGROUND_SHARE,
