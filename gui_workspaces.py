@@ -908,6 +908,12 @@ class VehicleVariantsPage(QWidget):
                 continue
             family=str(d.get("family_model") or "")
             family_l=family.lower()
+            proposal=None
+            if mode=="Regression proposal (fresh)":
+                if str(pid) in reviewed_pids():continue
+                proposal=experimental_bg_proposal(d)
+                if not proposal:continue
+                family=str(proposal["family"]);family_l=family.lower()
             uv=str(d.get("uv_winner") or "").lower()
             template=str(d.get("template_winner") or "").lower()
             primary=bool(d.get("primary_agree"))
@@ -917,7 +923,9 @@ class VehicleVariantsPage(QWidget):
             votes=int(d.get("votes") or 0)
             evidence=float(d.get("evidence_confidence") or 0.0)
 
-            if mode=="m002 ↔ m005 disagreements":
+            if mode=="Regression proposal (fresh)":
+                keep=True
+            elif mode=="m002 ↔ m005 disagreements":
                 keep=(not primary and {uv,template}=={"m002bg.model","m005bg.model"})
             elif mode=="m002 candidate disagreements":
                 keep=(family_l=="m002bg.model" and not primary)
@@ -938,9 +946,12 @@ class VehicleVariantsPage(QWidget):
             candidates.append({
                 "pid":str(pid),"textures":paths,"model":model,"state":"resolved","origin":"product",
                 "method":(
-                    f"BG validation candidate • {family} • UV {d.get('uv_winner') or '?'} "
-                    f"• template {d.get('template_winner') or '?'} • evidence {evidence:.3f} "
-                    f"• score {score:.4f} • margin {margin:.4f} • votes {votes}"
+                    (
+                        f"BG regression proposal • {family} • proposal margin {proposal['margin']:.4f} • "
+                        if proposal else f"BG validation candidate • {family} • "
+                    )
+                    + f"UV {d.get('uv_winner') or '?'} • template {d.get('template_winner') or '?'} "
+                    + f"• evidence {evidence:.3f} • score {score:.4f} • margin {margin:.4f} • votes {votes}"
                 ),
                 "_bg_score":score,"_bg_margin":margin,"_bg_votes":votes,
                 "_bg_evidence":evidence,"_bg_family":family
