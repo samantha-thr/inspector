@@ -7,6 +7,10 @@
     "m005bg.model"
   ],
   "exact": {
+    "12440401": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "27040701": {
       "family": "m002bg.model",
       "source": "dev27 additional blind raw-template review"
@@ -30,6 +34,10 @@
     "59448101": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
+    },
+    "62999201": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "63876541": {
       "family": "m002bg.model",
@@ -63,6 +71,14 @@
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
     },
+    "79118501": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
+    "79944551": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "80186191": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
@@ -87,6 +103,10 @@
       "family": "m002bg.model",
       "source": "dev27 additional blind raw-template review"
     },
+    "84269611": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "91499231": {
       "family": "m002bg.model",
       "source": "dev27 additional blind raw-template review"
@@ -110,6 +130,10 @@
     "110977341": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
+    },
+    "112509951": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "113482181": {
       "family": "m002bg.model",
@@ -146,6 +170,14 @@
     "125481561": {
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
+    },
+    "128353171": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
+    "132110561": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "140261691": {
       "family": "m005bg.model",
@@ -203,9 +235,17 @@
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "174522351": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "174700201": {
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
+    },
+    "175360991": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "175445631": {
       "family": "m002bg.model",
@@ -214,6 +254,10 @@
     "177441021": {
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
+    },
+    "178273181": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "179014661": {
       "family": "m002bg.model",
@@ -234,6 +278,18 @@
     "179728451": {
       "family": "m002bg.model",
       "source": "dev27 additional blind raw-template review"
+    },
+    "180304121": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
+    "183079591": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
+    "183994141": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "184149231": {
       "family": "m002bg.model",
@@ -259,6 +315,10 @@
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
     },
+    "187213801": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "188171111": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
@@ -275,6 +335,10 @@
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
     },
+    "192919811": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "196333111": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
@@ -286,6 +350,10 @@
     "201233141": {
       "family": "m002bg.model",
       "source": "dev23 fresh proposal boundary visual review — correct"
+    },
+    "202763291": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "206392811": {
       "family": "m002bg.model",
@@ -310,6 +378,10 @@
     "211337871": {
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
+    },
+    "211390831": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "212036821": {
       "family": "m002bg.model",
@@ -463,6 +535,10 @@
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
     },
+    "224391901": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "224825821": {
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
@@ -479,6 +555,18 @@
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
     },
+    "227955951": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
+    "228589801": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
+    "229642841": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "229978801": {
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
@@ -491,9 +579,17 @@
       "family": "m004bg.model",
       "source": "dev24 fresh m004 regression proposal visual review — correct"
     },
+    "231263881": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "231913801": {
       "family": "m004bg.model",
       "source": "dev24 fresh m004 regression proposal visual review — correct"
+    },
+    "232171011": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "232324841": {
       "family": "m004bg.model",
@@ -502,6 +598,10 @@
     "232436861": {
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
+    },
+    "232887801": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "234983811": {
       "family": "m005bg.model",
@@ -530,6 +630,10 @@
     "244616941": {
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
+    },
+    "245087801": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "245285921": {
       "family": "m002bg.model",
@@ -619,6 +723,10 @@
       "family": "m002bg.model",
       "source": "dev27 additional blind raw-template review"
     },
+    "628632098": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "636147032": {
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
@@ -639,6 +747,14 @@
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
     },
+    "649926866": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
+    "653136581": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "654318750": {
       "family": "m002bg.model",
       "source": "dev27 additional blind raw-template review"
@@ -647,9 +763,21 @@
       "family": "m002bg.model",
       "source": "dev27 additional blind raw-template review"
     },
+    "662114689": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "668100978": {
       "family": "m004bg.model",
       "source": "dev24 fresh m004 regression proposal visual review — correct"
+    },
+    "670801619": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
+    "670998520": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "677846869": {
       "family": "m002bg.model",
@@ -671,6 +799,10 @@
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
     },
+    "691849557": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "692596647": {
       "family": "m002bg.model",
       "source": "dev27 additional blind raw-template review"
@@ -691,6 +823,10 @@
       "family": "m002bg.model",
       "source": "manual/template verified difficult-case review"
     },
+    "703468731": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "705343060": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
@@ -698,6 +834,10 @@
     "705733770": {
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
+    },
+    "708216988": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "708553547": {
       "family": "m005bg.model",
@@ -718,6 +858,10 @@
     "720002610": {
       "family": "m002bg.model",
       "source": "dev23 fresh proposal boundary visual review — correct"
+    },
+    "720980565": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "730682443": {
       "family": "m002bg.model",
@@ -759,6 +903,10 @@
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "1027065772": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "1027957177": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
@@ -771,13 +919,29 @@
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
     },
+    "1037281920": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "1037733701": {
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
     },
+    "1039199091": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "1042318257": {
       "family": "m002bg.model",
       "source": "dev27 additional blind raw-template review"
+    },
+    "1044203231": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
+    "1046041325": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "1046763635": {
       "family": "m004bg.model",
@@ -803,6 +967,10 @@
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
     },
+    "1052515389": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "1053289320": {
       "family": "m002bg.model",
       "source": "dev27 additional blind raw-template review"
@@ -810,6 +978,10 @@
     "1054699795": {
       "family": "m004bg.model",
       "source": "dev24 fresh m004 regression proposal visual review — correct"
+    },
+    "1054865100": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "1055465794": {
       "family": "m002bg.model",
@@ -822,6 +994,10 @@
     "1055492348": {
       "family": "m002bg.model",
       "source": "dev27 blind raw-template manual review"
+    },
+    "1055754046": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "1055827750": {
       "family": "m002bg.model",
@@ -854,6 +1030,10 @@
     "1056435431": {
       "family": "m002bg.model",
       "source": "dev29 blind raw-template manual review"
+    },
+    "1056836065": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     },
     "1059205835": {
       "family": "m002bg.model",
@@ -931,6 +1111,10 @@
       "family": "m002bg.model",
       "source": "dev26 blind raw-template manual review"
     },
+    "1065492357": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "1065569775": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
@@ -975,6 +1159,10 @@
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
     },
+    "1066420496": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "1066746814": {
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
@@ -1015,6 +1203,14 @@
       "family": "m005bg.model",
       "source": "dev16 full m005 candidate review"
     },
+    "1066913552": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
+    "1066913561": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
+    },
     "1067006485": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
@@ -1034,6 +1230,10 @@
     "1067008351": {
       "family": "m004bg.model",
       "source": "dev20 m004 A/B visual review"
+    },
+    "1067098015": {
+      "family": "m002bg.model",
+      "source": "dev30 fresh reviewed-m002 production tier validation 50/50"
     }
   },
   "abstain": {
