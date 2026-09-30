@@ -804,19 +804,41 @@ def analyze_indexed_bg(progress_callback=None):
             result=analyze_bg_families(product_sets,models)
 
         counts=result.get("counts") or {}
+        reviewed_exact={}
+        try:
+            gt=json.loads((Path(__file__).resolve().parent/"bg_reviewed_ground_truth.json").read_text(encoding="utf-8"))
+            reviewed_exact={
+                str(pid):str(item.get("family") or "")
+                for pid,item in (gt.get("exact") or {}).items()
+                if isinstance(item,dict) and item.get("family")
+            }
+        except Exception:
+            reviewed_exact={}
+
+        assignments=result.get("assignments") or {}
+        reviewed_overrides=sum(
+            1 for pid,item in assignments.items()
+            if pid in reviewed_exact and item.get("state")!="resolved"
+        )
+        effective_needs_review=sum(
+            1 for pid,item in assignments.items()
+            if item.get("method")=="BG template family ambiguous" and pid not in reviewed_exact
+        )
         result["continuous"]={
             **status,
             "affected":affected,
             "affected_resolved":0,
             "affected_needs_review":0,
-            "total_resolved":int(counts.get("resolved",0) or 0),
-            "total_needs_review":int(counts.get("ambiguous",0) or 0),
+            "total_auto_resolved":int(counts.get("resolved",0) or 0),
+            "reviewed_overrides":reviewed_overrides,
+            "total_resolved":int(counts.get("resolved",0) or 0)+reviewed_overrides,
+            "total_needs_review":effective_needs_review,
         }
         affected_pids=set(status["new_pids"]+status["changed_pids"])
-        if affected_pids and result.get("assignments"):
+        if affected_pids and assignments:
             for pid in affected_pids:
-                item=(result["assignments"] or {}).get(pid) or {}
-                if item.get("state")=="resolved":
+                item=assignments.get(pid) or {}
+                if item.get("state")=="resolved" or pid in reviewed_exact:
                     result["continuous"]["affected_resolved"]+=1
                 elif item.get("method")=="BG template family ambiguous":
                     result["continuous"]["affected_needs_review"]+=1
