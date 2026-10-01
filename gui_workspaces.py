@@ -603,61 +603,91 @@ class BgTemplateReviewDialog(QDialog):
 
 class VehicleVariantsPage(QWidget):
     def __init__(self,db):
-        super().__init__();self.db=db;self.task=None;self.bg_task=None;self.bg_analysis_automatic=False;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;self.variant_page=0;self.variant_page_size=100;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
+        super().__init__();self.db=db;self.task=None;self.bg_task=None;self.bg_analysis_automatic=False;self.loaded_folder=None;self.sets=[];self.template_refs=[];self.template_assignments={};self.model=None;self.raw_texture_count=0;self.variant_page=0;self.variant_page_size=100;b=QVBoxLayout(self);b.setContentsMargins(28,24,28,24)
         h=QLabel("Product Variants");h.setObjectName("title");b.addWidget(h);b.addWidget(QLabel("Resolve product models from client evidence and render verified product/model combinations without manual model guessing."))
         # Keep legacy model/template selectors internally for BG research, but the
         # normal workflow is now folder -> resolver -> render.
-        select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(260);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder")
+        select_row=QHBoxLayout();self.folder=QComboBox();self.folder.setMinimumWidth(300);self.folder.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed);self.folder.setToolTip("Indexed asset folder • changing this selection loads it automatically")
         self.model_box=QComboBox();self.template_box=QComboBox()
-        load=QPushButton("Load Folder");load.clicked.connect(self.load_folder);self.load_button=load
         self.view_filter=QComboBox();self.view_filter.addItems(["Rendered","Missing resolved","Unresolved","All resolved"]);self.view_filter.currentIndexChanged.connect(self.reset_variant_page)
         self.populate_folders()
-        for w in (QLabel("Folder"),self.folder,load,QLabel("View"),self.view_filter):select_row.addWidget(w)
-        select_row.setStretch(1,3);select_row.addStretch();b.addLayout(select_row)
-        # Keep the primary workflow compact. Research/maintenance commands live in
-        # an Advanced menu instead of consuming the entire Product Variants toolbar.
+        for w in (QLabel("Folder"),self.folder,QLabel("View"),self.view_filter):select_row.addWidget(w)
+        select_row.setStretch(1,4);select_row.addStretch();b.addLayout(select_row)
+
+        # Everyday controls stay visible. Validation, research and maintenance live
+        # behind two compact menus so Product Variants remains a working surface,
+        # not a wall of laboratory controls.
         action_row=QHBoxLayout();self.workers=QComboBox();self.workers.addItems(["1","2","3","4"]);self.workers.setCurrentText("2")
         self.render_button=QPushButton("Render All Resolved");self.render_button.setToolTip("Render every missing product with a verified model assignment in the selected folder; unresolved products are skipped");self.render_button.clicked.connect(self.render_all_resolved)
-        self.cancel_button=QPushButton("Stop / Cancel");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
+        self.cancel_button=QPushButton("Stop");self.cancel_button.setEnabled(False);self.cancel_button.clicked.connect(self.cancel_render)
         self.delete_all_button=QPushButton("Delete Resolved Renders");self.delete_all_button.clicked.connect(self.delete_all_resolved_variants)
-        self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.last_failures=[];self.last_render_report=None;self.last_auto_report=None
-        self.export_render_button=QPushButton("Export Last Render");self.export_render_button.setEnabled(False);self.export_render_button.clicked.connect(self.export_last_render)
+        self.failures_button=QPushButton("Failures");self.failures_button.setEnabled(False);self.failures_button.clicked.connect(self.show_failures);self.failures_button.hide();self.last_failures=[];self.last_render_report=None;self.last_auto_report=None
+        self.export_render_button=QPushButton("Export Last Render");self.export_render_button.setEnabled(False);self.export_render_button.clicked.connect(self.export_last_render);self.export_render_button.hide()
         uv_analyze=QPushButton("Analyze UV Families");uv_analyze.clicked.connect(self.analyze_uv_families);self.uv_analyze_button=uv_analyze
         bg_analyze=QPushButton("Analyze BG Families");bg_analyze.clicked.connect(self.analyze_bg_families);self.bg_analyze_button=bg_analyze
         resolve=QPushButton("Resolution Preview");resolve.clicked.connect(self.show_resolution_preview);self.resolve_button=resolve
         config=QPushButton("Folder Configuration");config.clicked.connect(self.show_folder_configuration);self.config_button=config
-        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Regression proposal (fresh)","Regression proposal m004 (fresh)","Regression proposal m005 (fresh)","Regression proposal boundary (fresh)","m002 ↔ m005 disagreements","m002 candidate disagreements","m004 candidate disagreements","m005 candidate disagreements","Sparse evidence holds","All ambiguous"]);self.sample_mode.setToolTip("Validation modes probe unresolved BG populations without changing classifier state. Use these to approve the next automatic-resolution rules from small rendered samples.")
-        self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.setToolTip("Number of products in the validation sample")
-        sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample
+        self.sample_mode=QComboBox();self.sample_mode.addItems(["Resolved validation","Regression proposal (fresh)","Regression proposal m004 (fresh)","Regression proposal m005 (fresh)","Regression proposal boundary (fresh)","m002 ↔ m005 disagreements","m002 candidate disagreements","m004 candidate disagreements","m005 candidate disagreements","Sparse evidence holds","All ambiguous"]);self.sample_mode.hide()
+        self.sample_size=QComboBox();self.sample_size.addItems(["10","25","50","100"]);self.sample_size.setCurrentText("50");self.sample_size.hide()
+        sample=QPushButton("Render Sample");sample.clicked.connect(self.render_resolved_sample);self.sample_button=sample;sample.hide()
         template_review=QPushButton("Review Templates");template_review.setToolTip("Classify unresolved BG products directly from their raw _1 templates without rendering");template_review.clicked.connect(self.open_bg_template_review);self.template_review_button=template_review
+
+        validation=QToolButton();validation.setText("Validation");validation.setPopupMode(QToolButton.InstantPopup)
+        validation_menu=QMenu(validation)
+        render_validation=validation_menu.addAction("Render Validation Sample")
+        render_validation.triggered.connect(sample.click)
+        mode_menu=validation_menu.addMenu("Sample Mode")
+        for mode in [self.sample_mode.itemText(i) for i in range(self.sample_mode.count())]:
+            act=mode_menu.addAction(mode)
+            act.triggered.connect(lambda checked=False,m=mode:self.sample_mode.setCurrentText(m))
+        count_menu=validation_menu.addMenu("Sample Count")
+        for count in ("10","25","50","100"):
+            act=count_menu.addAction(count)
+            act.triggered.connect(lambda checked=False,n=count:self.sample_size.setCurrentText(n))
+        validation_menu.addSeparator()
+        compare_candidates=validation_menu.addAction("Compare BG Candidate Models")
+        compare_candidates.setToolTip("Render the two strongest paintable models side-by-side for the current unresolved validation population")
+        compare_candidates.triggered.connect(self.render_bg_candidate_comparison)
+        validation.setMenu(validation_menu)
 
         advanced=QToolButton();advanced.setText("Advanced");advanced.setPopupMode(QToolButton.InstantPopup)
         advanced_menu=QMenu(advanced)
-        for label,button in (("Analyze UV Families",uv_analyze),("Folder Configuration",config),("Delete Resolved Renders",self.delete_all_button)):
-            act=advanced_menu.addAction(label);act.triggered.connect(button.click)
+        preview_action=advanced_menu.addAction("Resolution Preview");preview_action.triggered.connect(resolve.click)
+        failures_action=advanced_menu.addAction("Failures…");failures_action.triggered.connect(self.show_failures)
+        export_action=advanced_menu.addAction("Export Last Render…");export_action.triggered.connect(self.export_last_render)
         advanced_menu.addSeparator()
+        analyze_bg_action=advanced_menu.addAction("Analyze BG Families");analyze_bg_action.triggered.connect(bg_analyze.click)
+        analyze_uv_action=advanced_menu.addAction("Analyze UV Families");analyze_uv_action.triggered.connect(uv_analyze.click)
         regression_lab=advanced_menu.addAction("Run BG Regression Lab")
         regression_lab.setToolTip("Evaluate experimental scoring against the human-reviewed BG regression set without changing production")
         regression_lab.triggered.connect(self.run_bg_regression_lab)
-        compare_candidates=advanced_menu.addAction("Compare BG Candidate Models")
-        compare_candidates.setToolTip("Render the two strongest paintable models side-by-side for the current unresolved validation population")
-        compare_candidates.triggered.connect(self.render_bg_candidate_comparison)
+        advanced_menu.addSeparator()
+        config_action=advanced_menu.addAction("Folder Configuration");config_action.triggered.connect(config.click)
+        delete_action=advanced_menu.addAction("Delete Resolved Renders");delete_action.triggered.connect(self.delete_all_resolved_variants)
         advanced.setMenu(advanced_menu)
 
-        for w in (bg_analyze,resolve,QLabel("Validation"),self.sample_mode,QLabel("Count"),self.sample_size,sample,self.render_button,self.cancel_button):
+        for w in (self.render_button,self.cancel_button,template_review,QLabel("Workers"),self.workers,validation,advanced):
             action_row.addWidget(w)
         action_row.addStretch();b.addLayout(action_row)
-
-        utility_row=QHBoxLayout()
-        for w in (template_review,QLabel("Workers"),self.workers,self.failures_button,self.export_render_button,advanced):
-            utility_row.addWidget(w)
-        utility_row.addStretch();b.addLayout(utility_row)
         self.compatibility=QLabel("Resolver status: verified PID/model matches and explicit official default-model rules.");self.compatibility.setWordWrap(True);b.addWidget(self.compatibility)
         self.progress=QProgressBar();self.status=QLabel("Ready");b.addWidget(self.progress);b.addWidget(self.status)
         pager=QHBoxLayout();self.variant_prev=QPushButton("Previous");self.variant_next=QPushButton("Next");self.variant_page_label=QLabel("Page 1 of 1")
         self.variant_prev.clicked.connect(lambda:self.change_variant_page(-1));self.variant_next.clicked.connect(lambda:self.change_variant_page(1))
         pager.addWidget(self.variant_prev);pager.addWidget(self.variant_page_label);pager.addWidget(self.variant_next);pager.addStretch();b.addLayout(pager)
-        self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.template_box.currentIndexChanged.connect(self.refresh);self.load_folder()
+        self.area=QScrollArea();self.area.setWidgetResizable(True);b.addWidget(self.area,1);self.model_box.currentIndexChanged.connect(self.refresh);self.template_box.currentIndexChanged.connect(self.refresh);self.folder.currentIndexChanged.connect(self.folder_changed);self.load_folder()
+
+    def folder_changed(self,*_):
+        if (self.task and self.task.isRunning()) or (self.bg_task and self.bg_task.isRunning()):
+            QMessageBox.information(self,APP_NAME,"Stop the active render or BG analysis before changing folders.")
+            if self.loaded_folder:
+                self.folder.blockSignals(True)
+                idx=self.folder.findData(self.loaded_folder)
+                if idx>=0:self.folder.setCurrentIndex(idx)
+                self.folder.blockSignals(False)
+            return
+        self.variant_page=0
+        self.load_folder()
+
     def open_bg_template_review(self):
         if self.folder_name().lower()!="bg":
             QMessageBox.information(self,APP_NAME,"Template Review is available for the bg folder.");return
@@ -694,7 +724,7 @@ class VehicleVariantsPage(QWidget):
         return (m.group(1),int(m.group(2))) if m else None
     def load_folder(self):
         folder=self.folder_name();previous=self.model_box.currentText();auto_bg=False;bg_status=None
-        self.status.setText(f"Loading {folder}…");self.load_button.setEnabled(False);QApplication.processEvents()
+        self.status.setText(f"Loading {folder}…");self.folder.setEnabled(False);QApplication.processEvents()
         try:
             models=self.db.models_in_folder(folder,10000);self.model_box.blockSignals(True);self.model_box.clear()
             for m in models:self.model_box.addItem(m["filename"],dict(m))
@@ -711,7 +741,9 @@ class VehicleVariantsPage(QWidget):
                 dbg=self.db.texture_folder_debug(folder,8)
                 samples=" | ".join(f"{x['folder']!r}: {x['count']:,} e.g. {x['sample']}" for x in dbg)
                 self.status.setText(f"Loaded {len(models):,} models • scanned 0 textures for {folder} • DB matches: {samples or 'none'}")
-        finally:self.load_button.setEnabled(True)
+        finally:
+            self.loaded_folder=folder
+            self.folder.setEnabled(True)
         if auto_bg:
             self.status.setText(
                 f"BG resolver found {int(bg_status.get('new',0)):,} new and "
