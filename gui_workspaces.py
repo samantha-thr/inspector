@@ -957,7 +957,7 @@ class VehicleVariantsPage(QWidget):
         note=QLabel("Resolution removes each texture's background and compares the remaining outline with decoded model UV-island boundaries and verified stock-template outlines. Primary UV + template agreement resolves close family ties without a minimum margin. The validated regression tier uses paintable-only 60/35/5 outline scoring with no occupancy contribution, a 0.020 proposal margin, and a minimum template-outline support gate so generic/non-discriminating textures remain unresolved. Sparse textures are also held for review.")
         note.setWordWrap(True);v.addWidget(note)
         close=QDialogButtonBox(QDialogButtonBox.Close);close.rejected.connect(d.reject);v.addWidget(close);d.exec()
-        self.status.setText(f"BG analysis complete • {counts.get('resolved',0):,} resolved • {counts.get('ambiguous',0):,} ambiguous • {counts.get('low_information',0):,} low-information • {counts.get('special',0):,} special/non-paintable")
+        self.status.setText(f"Raw BG classifier • {counts.get('resolved',0):,} auto-resolved • {counts.get('ambiguous',0):,} classifier abstentions • {counts.get('low_information',0):,} low-information • {counts.get('special',0):,} special/non-paintable • effective totals shown above")
 
     def show_folder_configuration(self):
         folder=self.folder_name();models=self.db.models_in_folder(folder,10000);textures=self.db.textures_in_folder(folder,100000)
